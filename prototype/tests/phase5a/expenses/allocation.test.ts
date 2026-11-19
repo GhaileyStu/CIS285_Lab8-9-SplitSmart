@@ -4,7 +4,7 @@ import {
   AllocationError,
   parseAmountToCents,
   type AllocateExpenseInput,
-} from "./allocation";
+} from "../../../src/features/phase5a/expenses/allocation";
 
 function allocate(input: AllocateExpenseInput) {
   return allocateExpense(input);

@@ -9,7 +9,7 @@ import {
   ExpenseCreationError,
   type CreateDirectExpenseInput,
   type CreateGroupExpenseInput,
-} from "./create-expense";
+} from "../../../src/features/phase5a/expenses/create-expense";
 
 let prisma: PrismaClient;
 let testDirectory: string;
@@ -361,5 +361,24 @@ describe("expense creation service", () => {
       createExpense(directInput(highUserId, lowUserId, { currencyCode: "usd" }), prisma),
     ).rejects.toBeInstanceOf(ExpenseCreationError);
     expect(await prisma.expense.count()).toBe(before);
+  });
+
+  it.each(["2026-02-30", "2026-04-31"])("rejects impossible calendar date %s before writes", async (expenseDate) => {
+    const fixture = await createGroupFixture();
+    await expect(createExpense(groupInput(fixture, { expenseDate }), prisma))
+      .rejects.toMatchObject({ code: "INVALID_INPUT", message: "Expense date is invalid." });
+    expect(await prisma.expense.count({ where: { groupId: fixture.group.id } })).toBe(0);
+    expect(await prisma.balanceScope.count({ where: { groupId: fixture.group.id } })).toBe(0);
+  });
+
+  it.each([
+    ["2024-02-29", "2024-02-29T00:00:00.000Z"],
+    ["2026-11-19T09:30:00-05:00", "2026-11-19T14:30:00.000Z"],
+    [new Date("2026-11-19T12:00:00.000Z"), "2026-11-19T12:00:00.000Z"],
+  ])("preserves the expected UTC instant for %s", async (expenseDate, expected) => {
+    const fixture = await createGroupFixture();
+    const result = await createExpense(groupInput(fixture, { expenseDate }), prisma);
+    const revision = await prisma.expenseRevision.findUniqueOrThrow({ where: { id: result.revisionId } });
+    expect(revision.expenseDate.toISOString()).toBe(expected);
   });
 });
