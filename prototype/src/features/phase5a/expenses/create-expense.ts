@@ -1,12 +1,10 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import {
   allocateExpense,
-  MAX_SQLITE_INTEGER,
   type ExpenseSplitMethod,
 } from "./allocation";
 import { prisma } from "../../../lib/prisma";
-
-const MIN_SQLITE_INTEGER = -BigInt("9223372036854775808");
+import { applyExpenseObligations, BalanceProjectionError } from "./balance-projection";
 
 export type ExpenseCreationErrorCode =
   | "INVALID_INPUT"
@@ -115,57 +113,6 @@ function validateDirectPair(input: CreateDirectExpenseInput): { low: string; hig
   }
   const [low, high] = [...people].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
   return { low, high };
-}
-
-function addDirectExpenseObligations(
-  tx: Prisma.TransactionClient,
-  scopeId: string,
-  payerUserId: string,
-  shares: ReturnType<typeof allocateExpense>["shares"],
-) {
-  return Promise.all(
-    shares
-      .filter((share) => share.participantUserId !== payerUserId && share.shareCents > BigInt(0))
-      .map(async (share) => {
-        const debtorUserId = share.participantUserId;
-        const debtorIsLow = debtorUserId < payerUserId;
-        const userLowId = debtorIsLow ? debtorUserId : payerUserId;
-        const userHighId = debtorIsLow ? payerUserId : debtorUserId;
-        const signedDelta = debtorIsLow ? share.shareCents : -share.shareCents;
-        const existing = await tx.pairwiseObligation.findUnique({
-          where: {
-            balanceScopeId_userLowId_userHighId: {
-              balanceScopeId: scopeId,
-              userLowId,
-              userHighId,
-            },
-          },
-          select: { id: true, signedBalanceCents: true },
-        });
-        const nextBalance = (existing?.signedBalanceCents ?? BigInt(0)) + signedDelta;
-        if (nextBalance < MIN_SQLITE_INTEGER || nextBalance > MAX_SQLITE_INTEGER) {
-          throw new ExpenseCreationError(
-            "BALANCE_OVERFLOW",
-            "The direct expense would exceed the supported signed balance range.",
-          );
-        }
-        if (existing) {
-          await tx.pairwiseObligation.update({
-            where: { id: existing.id },
-            data: { signedBalanceCents: nextBalance },
-          });
-        } else {
-          await tx.pairwiseObligation.create({
-            data: {
-              balanceScopeId: scopeId,
-              userLowId,
-              userHighId,
-              signedBalanceCents: nextBalance,
-            },
-          });
-        }
-      }),
-  );
 }
 
 export async function createExpense(
@@ -321,12 +268,14 @@ export async function createExpense(
         where: { id: expense.id },
         data: { status: "APPROVED" },
       });
-      await addDirectExpenseObligations(
-        tx,
-        balanceScopeId,
-        payerUserId,
-        allocation.shares,
-      );
+      try {
+        await applyExpenseObligations(tx, balanceScopeId, payerUserId, allocation.shares);
+      } catch (error) {
+        if (error instanceof BalanceProjectionError) {
+          throw new ExpenseCreationError("BALANCE_OVERFLOW", "The direct expense would exceed the supported signed balance range.");
+        }
+        throw error;
+      }
       status = "APPROVED";
     }
 

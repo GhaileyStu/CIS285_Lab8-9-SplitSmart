@@ -1,15 +1,16 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { addMemberAction, createGroupAction, deactivateMemberAction, updateGroupAction } from "../actions/groups";
-import { createGroupExpenseAction } from "../actions/expenses";
+import { approveGroupExpenseAction, createGroupExpenseAction, rejectGroupExpenseAction } from "../actions/expenses";
 import { logoutAction } from "../actions/auth";
 import { SubmitButton } from "./submit-button";
 import { getCurrentUser } from "../auth/session";
-import { listGroupExpenses } from "../expenses/history";
+import { listFormerParticipantPendingDecisions, listGroupExpenses } from "../expenses/history";
 import { listGroupsForUser } from "../groups/service";
 
 type GroupData = Awaited<ReturnType<typeof listGroupsForUser>>[number];
 type ExpenseData = Awaited<ReturnType<typeof listGroupExpenses>>["expenses"][number];
+type FormerDecisionData = Awaited<ReturnType<typeof listFormerParticipantPendingDecisions>>[number];
 
 function money(cents: bigint, currency: string) {
   const whole = cents / BigInt(100);
@@ -45,13 +46,36 @@ function MemberList({ group, userId }: { group: GroupData; userId: string }) {
   </div>;
 }
 
-function ExpenseCard({ expense, currency }: { expense: ExpenseData; currency: string }) {
+function ExpenseCard({ expense, currency, userId, groupName }: {
+  expense: ExpenseData | FormerDecisionData;
+  currency: string;
+  userId: string;
+  groupName?: string;
+}) {
   const revision = expense.revision;
+  const approvals = revision.approvals;
+  const approvedCount = approvals.filter((approval) => approval.decision === "APPROVE").length;
+  const userDecision = approvals.find((approval) => approval.participantUserId === userId);
+  const canDecide = expense.status === "PENDING" && !userDecision && revision.shares.some((share) => share.participantUserId === userId);
   return <article className="expense-card">
     <div className="expense-icon">{revision.splitMethod === "EQUAL" ? "↗" : "%"}</div>
     <div className="expense-main"><div className="expense-title-row"><h3>{revision.description}</h3><span className={`status-pill status-${expense.status.toLowerCase()}`}>{expense.status === "PENDING" ? "Awaiting review" : expense.status}</span></div>
+      {groupName && <p className="approval-group-label">Former group · <strong>{groupName}</strong></p>}
       <p>Paid by <strong>{revision.payer.displayName}</strong> <span className="dot">·</span> {dateLabel(revision.expenseDate)} <span className="dot">·</span> {revision.splitMethod === "EQUAL" ? "Equal split" : "Percentage split"}</p>
       <div className="participants">{revision.shares.map((share) => <span className="participant-chip" key={share.id}>{share.participant.displayName} <b>{money(share.shareCents, currency)}</b></span>)}</div>
+      <div className="approval-progress" aria-label={`${approvedCount} of ${revision.shares.length} approvals received`}>
+        <span className="approval-count">{expense.status === "APPROVED" ? "All participants approved" : `${approvedCount} of ${revision.shares.length} approvals`}</span>
+        <div className="approval-decisions">{revision.shares.map((share) => {
+          const participantDecision = approvals.find((approval) => approval.participantUserId === share.participantUserId)?.decision;
+          const label = participantDecision === "APPROVE" ? "Approved" : participantDecision === "REJECT" ? "Rejected" : "Awaiting";
+          return <span className={`decision-chip decision-${label.toLowerCase()}`} key={share.id}>{share.participant.displayName}: {label}</span>;
+        })}</div>
+      </div>
+      {canDecide && <div className="approval-actions">
+        <form action={approveGroupExpenseAction}><input type="hidden" name="expenseId" value={expense.id}/><SubmitButton className="button button-dark" pendingLabel="Approving…">Approve</SubmitButton></form>
+        <form action={rejectGroupExpenseAction}><input type="hidden" name="expenseId" value={expense.id}/><SubmitButton className="button button-reject" pendingLabel="Rejecting…">Reject</SubmitButton></form>
+      </div>}
+      {userDecision && <p className="own-decision">Your decision: <strong>{userDecision.decision === "APPROVE" ? "Approved" : "Rejected"}</strong></p>}
     </div><strong className="expense-total">{money(revision.amountCents, currency)}</strong>
   </article>;
 }
@@ -61,6 +85,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   if (!user) redirect("/login");
   const params = await searchParams;
   const groups = await listGroupsForUser(user.id);
+  const formerDecisions = await listFormerParticipantPendingDecisions(user.id);
   const selected = groups.find((group) => group.id === params.group);
   const history = selected ? await listGroupExpenses(user.id, selected.id) : null;
   const totalExpenses = groups.reduce((sum, group) => sum + group._count.expenses, 0);
@@ -75,6 +100,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     <section className="main-content"><header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {selected ? selected.name : "Overview"}</div><div className="topbar-user"><span className="online-dot"/> Local prototype <span className="topbar-avatar">{initials(user.displayName)}</span></div></header>
       <div className="content-wrap">
         {params.error && <div className="notice error" role="alert">{params.error}</div>}{params.notice && <div className="notice success" role="status">{params.notice}</div>}
+        {formerDecisions.length > 0 && <section className="panel former-approvals-panel" aria-labelledby="former-approvals-title">
+          <div className="section-heading"><div><span className="eyebrow">ONE-TIME ACCESS</span><h2 id="former-approvals-title">Pending decisions <span className="heading-count">{formerDecisions.length}</span></h2></div><span className="round-icon peach">✓</span></div>
+          <p className="panel-intro">These are only pending expenses in which you participated before leaving a group.</p>
+          <div className="expense-list">{formerDecisions.map((expense)=><ExpenseCard key={expense.id} expense={expense} currency={expense.group.currencyCode} groupName={expense.group.name} userId={user.id}/>)}</div>
+        </section>}
         {!selected ? <>
           <section className="welcome-row"><div><span className="eyebrow">YOUR SHARED SPACES</span><h1>Good to see you, {user.displayName.split(" ")[0]} <span className="wave">✳</span></h1><p>Here’s a little snapshot of your shared spending.</p></div><a href="#new-group" className="button button-dark">Create a group <span>＋</span></a></section>
           <section className="stat-grid"><div className="stat-card"><span className="stat-icon mint">▦</span><span className="stat-label">YOUR GROUPS</span><strong>{groups.length.toString().padStart(2, "0")}</strong><small>Active shared spaces</small></div><div className="stat-card"><span className="stat-icon lavender">♙</span><span className="stat-label">MEMBERS</span><strong>{totalMembers.toString().padStart(2, "0")}</strong><small>Across your groups</small></div><div className="stat-card"><span className="stat-icon peach">↗</span><span className="stat-label">RECORDED EXPENSES</span><strong>{totalExpenses.toString().padStart(2, "0")}</strong><small>Saved to your history</small></div></section>
@@ -94,7 +124,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             </div>
           </section>
           <section className="panel history-panel"><div className="section-heading"><div><span className="eyebrow">THE PAPER TRAIL</span><h2>Expense history <span className="heading-count">{history?.expenses.length ?? 0}</span></h2></div><span className="round-icon">↗</span></div>
-            {!history?.expenses.length ? <div className="empty-history"><span>◷</span><div><strong>No expenses here yet</strong><p>Saved expenses and each person’s share will appear here.</p></div></div> : <div className="expense-list">{history.expenses.map((expense)=><ExpenseCard key={expense.id} expense={expense} currency={history.group.currencyCode}/>)}</div>}
+            {!history?.expenses.length ? <div className="empty-history"><span>◷</span><div><strong>No expenses here yet</strong><p>Saved expenses and each person’s share will appear here.</p></div></div> : <div className="expense-list">{history.expenses.map((expense)=><ExpenseCard key={expense.id} expense={expense} currency={history.group.currencyCode} userId={user.id}/>)}</div>}
           </section><footer className="page-footer">Shared expenses stay connected to their group <span>✳</span></footer>
         </>}
       </div>

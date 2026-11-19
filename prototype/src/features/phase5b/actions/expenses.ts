@@ -5,6 +5,7 @@ import { requireUser } from "../auth/session";
 import { createExpense } from "../../phase5a/expenses/create-expense";
 import { requireActiveGroupMember } from "../groups/service";
 import type { ExpenseSplitMethod } from "../../phase5a/expenses/allocation";
+import { decideGroupExpense, type ExpenseDecisionResult } from "../expenses/approvals";
 
 function text(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -47,4 +48,42 @@ export async function createGroupExpenseAction(formData: FormData) {
   }
   if (message) redirect(`/?group=${encodeURIComponent(groupId)}&error=${encodeURIComponent(message)}`);
   redirect(`/?group=${encodeURIComponent(groupId)}&notice=Expense%20saved%20to%20history.`);
+}
+
+async function submitExpenseDecision(formData: FormData, decision: "APPROVE" | "REJECT") {
+  const user = await requireUser();
+  const expenseId = text(formData, "expenseId");
+  let result: ExpenseDecisionResult | undefined;
+  let message: string | null = null;
+  try {
+    result = await decideGroupExpense(user.id, expenseId, decision);
+  } catch (error) {
+    message = error instanceof Error ? error.message : "Could not record your decision.";
+  }
+
+  if (message || !result) redirect(`/?error=${encodeURIComponent(message ?? "Could not record your decision.")}`);
+
+  if (result.repeated) {
+    message = result.status === "REJECTED"
+      ? "Your decision was already recorded. This expense is rejected."
+      : result.status === "APPROVED"
+        ? "Your decision was already recorded. This expense is approved."
+        : "Your decision was already recorded; no additional approval was added.";
+  } else if (result.status === "REJECTED") {
+    message = "Expense rejected. It will not affect group balances.";
+  } else if (result.status === "APPROVED") {
+    message = "Expense approved. Group balances have been updated.";
+  } else {
+    message = `Decision recorded. ${result.approvalCount} of ${result.requiredApprovals} participants have approved.`;
+  }
+
+  redirect(`/?group=${encodeURIComponent(result.groupId)}&notice=${encodeURIComponent(message)}`);
+}
+
+export async function approveGroupExpenseAction(formData: FormData) {
+  await submitExpenseDecision(formData, "APPROVE");
+}
+
+export async function rejectGroupExpenseAction(formData: FormData) {
+  await submitExpenseDecision(formData, "REJECT");
 }
