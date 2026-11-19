@@ -12,3 +12,316 @@ model EnvironmentCheck {
   message   String
   createdAt DateTime @default(now())
 }
+
+model User {
+  id                String                 @id @default(cuid())
+  username          String                 @unique
+  email             String                 @unique
+  passwordHash      String
+  displayName       String
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  sessions          Session[]
+  groupsOwned       Group[]                @relation("GroupOwner")
+  memberships       GroupMembership[]
+  invitationsSent   Invitation[]           @relation("InvitationInviter")
+  invitationsJoined Invitation[]           @relation("InvitationAccepter")
+  expensesCreated   Expense[]              @relation("ExpenseCreator")
+  revisionsCreated  ExpenseRevision[]      @relation("RevisionCreator")
+  revisionsPaid     ExpenseRevision[]      @relation("RevisionPayer")
+  shares            ExpenseShare[]
+  approvals         Approval[]
+  reversalsCreated  Reversal[]              @relation("ReversalCreator")
+  reversalDebtorEntries ReversalEntry[]     @relation("ReversalDebtor")
+  reversalCreditorEntries ReversalEntry[]   @relation("ReversalCreditor")
+  notifications     Notification[]
+  paymentsDebtor    Payment[]               @relation("PaymentDebtor")
+  paymentsCreditor  Payment[]               @relation("PaymentCreditor")
+  paymentsRecorder  Payment[]               @relation("PaymentRecorder")
+  directScopesLow   BalanceScope[]          @relation("DirectLowUser")
+  directScopesHigh  BalanceScope[]          @relation("DirectHighUser")
+  pairwiseLow       PairwiseObligation[]    @relation("PairwiseLowUser")
+  pairwiseHigh      PairwiseObligation[]    @relation("PairwiseHighUser")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model LoginThrottleBucket {
+  id              String    @id @default(cuid())
+  kind            String
+  keyHash         String
+  failureCount    Int       @default(0)
+  windowStartedAt DateTime
+  delayLevel      Int       @default(0)
+  updatedAt       DateTime  @updatedAt
+  blockedUntil    DateTime?
+
+  @@unique([kind, keyHash])
+  @@index([blockedUntil])
+}
+
+model Group {
+  id           String            @id @default(cuid())
+  ownerId      String
+  name         String
+  currencyCode String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  owner        User              @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  memberships  GroupMembership[]
+  invitations  Invitation[]
+  expenses     Expense[]
+  balanceScope BalanceScope?
+}
+
+model GroupMembership {
+  id             String             @id @default(cuid())
+  groupId        String
+  userId         String
+  role           String
+  status         String
+  createdAt      DateTime           @default(now())
+  deactivatedAt  DateTime?
+  group          Group              @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  user           User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  periods        MembershipPeriod[]
+
+  @@unique([groupId, userId])
+  @@index([groupId, status])
+  @@index([userId, status])
+}
+
+model MembershipPeriod {
+  id           String         @id @default(cuid())
+  membershipId String
+  joinedAt     DateTime
+  leftAt       DateTime?
+  membership   GroupMembership @relation(fields: [membershipId], references: [id], onDelete: Restrict)
+
+  @@index([membershipId, joinedAt])
+}
+
+model Invitation {
+  id                String   @id @default(cuid())
+  groupId           String
+  invitedByUserId   String
+  acceptedByUserId  String?
+  emailNormalized   String
+  tokenHash         String   @unique
+  status            String
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+  acceptedAt        DateTime?
+  revokedAt         DateTime?
+  group             Group    @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  invitedBy         User     @relation("InvitationInviter", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  acceptedBy        User?    @relation("InvitationAccepter", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([groupId, status, expiresAt])
+  @@index([emailNormalized, status])
+}
+
+model BalanceScope {
+  id                String              @id @default(cuid())
+  kind              String
+  groupId           String?             @unique
+  directLowUserId   String?
+  directHighUserId  String?
+  currencyCode      String
+  createdAt         DateTime            @default(now())
+  group             Group?              @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  directLowUser     User?               @relation("DirectLowUser", fields: [directLowUserId], references: [id], onDelete: Restrict)
+  directHighUser    User?               @relation("DirectHighUser", fields: [directHighUserId], references: [id], onDelete: Restrict)
+  expensesCurrent   Expense[]           @relation("ExpenseCurrentScope")
+  revisions         ExpenseRevision[]
+  reversalsEntries  ReversalEntry[]
+  payments          Payment[]
+  obligations       PairwiseObligation[]
+
+  @@index([directLowUserId, directHighUserId, currencyCode])
+}
+
+model Expense {
+  id                    String         @id @default(cuid())
+  kind                  String
+  groupId               String?
+  createdByUserId       String
+  currentRevisionNumber Int
+  currentBalanceScopeId String?
+  status                String
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  group                 Group?         @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  createdBy             User           @relation("ExpenseCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  currentBalanceScope   BalanceScope?  @relation("ExpenseCurrentScope", fields: [currentBalanceScopeId], references: [id], onDelete: Restrict)
+  revisions             ExpenseRevision[]
+  replacementFor        Reversal?       @relation("ReversalReplacement")
+
+  @@index([groupId, createdAt])
+  @@index([createdByUserId, createdAt])
+  @@index([status, createdAt])
+  @@index([currentBalanceScopeId])
+}
+
+model ExpenseRevision {
+  id              String          @id @default(cuid())
+  expenseId       String
+  revisionNumber  Int
+  createdByUserId String
+  createdAt       DateTime        @default(now())
+  payerUserId     String
+  balanceScopeId  String
+  amountCents     BigInt
+  currencyCode    String
+  expenseDate     DateTime
+  description     String
+  splitMethod     String
+  expense         Expense         @relation(fields: [expenseId], references: [id], onDelete: Restrict)
+  createdBy       User            @relation("RevisionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  payer           User            @relation("RevisionPayer", fields: [payerUserId], references: [id], onDelete: Restrict)
+  balanceScope    BalanceScope    @relation(fields: [balanceScopeId], references: [id], onDelete: Restrict)
+  shares          ExpenseShare[]
+  approvals       Approval[]
+  notification    Notification[]
+  receipt         Receipt?
+  reversal        Reversal?
+
+  @@unique([expenseId, revisionNumber])
+  @@index([balanceScopeId, expenseDate])
+  @@index([payerUserId, expenseDate])
+  @@index([createdByUserId, createdAt])
+}
+
+model ExpenseShare {
+  id                  String           @id @default(cuid())
+  revisionId          String
+  participantUserId   String
+  shareCents          BigInt
+  percentageBasisPoints Int?
+  allocationOrder     Int
+  revision            ExpenseRevision  @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  participant         User             @relation(fields: [participantUserId], references: [id], onDelete: Restrict)
+  reversalEntries     ReversalEntry[]
+
+  @@unique([revisionId, participantUserId])
+  @@unique([revisionId, allocationOrder])
+  @@index([participantUserId, revisionId])
+}
+
+model Approval {
+  id                String          @id @default(cuid())
+  revisionId        String
+  participantUserId String
+  decision          String
+  createdAt         DateTime        @default(now())
+  revision          ExpenseRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  participant       User            @relation(fields: [participantUserId], references: [id], onDelete: Restrict)
+
+  @@unique([revisionId, participantUserId])
+  @@index([participantUserId, createdAt])
+  @@index([revisionId, decision])
+}
+
+model Reversal {
+  id                 String          @id @default(cuid())
+  revisionId         String          @unique
+  createdByUserId    String
+  replacementExpenseId String?       @unique
+  reason             String
+  createdAt          DateTime        @default(now())
+  originalRevision   ExpenseRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  createdBy          User            @relation("ReversalCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  replacementExpense Expense?        @relation("ReversalReplacement", fields: [replacementExpenseId], references: [id], onDelete: Restrict)
+  entries            ReversalEntry[]
+}
+
+model ReversalEntry {
+  id              String          @id @default(cuid())
+  reversalId      String
+  sourceShareId   String
+  balanceScopeId  String
+  debtorUserId    String
+  creditorUserId  String
+  amountCents     BigInt
+  reversal        Reversal        @relation(fields: [reversalId], references: [id], onDelete: Restrict)
+  sourceShare     ExpenseShare    @relation(fields: [sourceShareId], references: [id], onDelete: Restrict)
+  balanceScope    BalanceScope    @relation(fields: [balanceScopeId], references: [id], onDelete: Restrict)
+  debtor          User            @relation("ReversalDebtor", fields: [debtorUserId], references: [id], onDelete: Restrict)
+  creditor        User            @relation("ReversalCreditor", fields: [creditorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([reversalId, sourceShareId])
+  @@index([balanceScopeId, debtorUserId, creditorUserId])
+}
+
+model Notification {
+  id          String          @id @default(cuid())
+  recipientUserId String
+  revisionId  String
+  kind        String
+  createdAt   DateTime        @default(now())
+  readAt      DateTime?
+  recipient   User            @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+  revision    ExpenseRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@unique([recipientUserId, revisionId, kind])
+  @@index([recipientUserId, readAt, createdAt])
+}
+
+model Receipt {
+  id                   String          @id @default(cuid())
+  revisionId           String          @unique
+  content              Bytes
+  detectedContentType  String
+  sizeBytes            Int
+  sha256               String
+  createdAt            DateTime        @default(now())
+  revision             ExpenseRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+}
+
+model Payment {
+  id               String       @id @default(cuid())
+  balanceScopeId   String
+  debtorUserId     String
+  creditorUserId   String
+  recordedByUserId String
+  amountCents      BigInt
+  idempotencyKey   String       @unique
+  requestHash      String
+  paymentDate      DateTime
+  createdAt        DateTime     @default(now())
+  balanceScope     BalanceScope @relation(fields: [balanceScopeId], references: [id], onDelete: Restrict)
+  debtor           User         @relation("PaymentDebtor", fields: [debtorUserId], references: [id], onDelete: Restrict)
+  creditor         User         @relation("PaymentCreditor", fields: [creditorUserId], references: [id], onDelete: Restrict)
+  recordedBy       User         @relation("PaymentRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([balanceScopeId, paymentDate])
+  @@index([debtorUserId, creditorUserId, createdAt])
+  @@index([requestHash])
+}
+
+model PairwiseObligation {
+  id               String       @id @default(cuid())
+  balanceScopeId   String
+  userLowId        String
+  userHighId       String
+  signedBalanceCents BigInt      @default(0)
+  updatedAt        DateTime     @updatedAt
+  balanceScope     BalanceScope @relation(fields: [balanceScopeId], references: [id], onDelete: Cascade)
+  userLow          User         @relation("PairwiseLowUser", fields: [userLowId], references: [id], onDelete: Restrict)
+  userHigh         User         @relation("PairwiseHighUser", fields: [userHighId], references: [id], onDelete: Restrict)
+
+  @@unique([balanceScopeId, userLowId, userHighId])
+  @@index([userLowId, balanceScopeId])
+  @@index([userHighId, balanceScopeId])
+}
