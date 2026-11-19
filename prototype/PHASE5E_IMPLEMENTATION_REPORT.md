@@ -1,6 +1,6 @@
 # Phase 5E Implementation Report — Payments and Settlement
 
-**Status:** Implemented; automated verification complete. Manual browser verification remains outstanding.
+**Status:** Implemented. Automated verification passed. The primary group payment workflow passed user-reported manual browser verification.
 **Date:** November 19, 2026
 **Scope:** Phase 5E only. No Phase 5F or Phase 5G work was started.
 
@@ -80,9 +80,9 @@ The after-work SHA-256 was identical:
 
 No migration or reset command was run. Prisma validation was read-only. No dependencies were installed or upgraded. Prisma remains 6.19.3. No commits or pushes were made.
 
-## Manual browser verification
+## Browser verification checklist
 
-Not performed during this implementation. After starting the development server, sign in as the debtor through the application and verify:
+The user-reported group payment results below cover part of this checklist. Retained checklist for further browser verification:
 
 1. A group debtor sees a payment form only for their own outstanding pairwise obligations; another group member does not see a payment form for that pair as creditor.
 2. Submit a partial amount and confirm the remaining balance decreases by exactly that amount after redirect/refresh.
@@ -92,9 +92,7 @@ Not performed during this implementation. After starting the development server,
 6. Repeat the equivalent checks for a DIRECT scope and confirm it remains separate from group totals.
 7. Refresh the page and confirm the updated balances and immutable payment history persist.
 
-No manual browser result is claimed. Automated tests do not replace these browser checks.
-
-## Manual Browser Verification
+## User-reported manual browser verification
 
 **Evidence type:** User-reported manual browser observations. The following results were confirmed by the user as matching expectations.
 
@@ -111,7 +109,7 @@ These observations do not establish manual testing of overpayments, duplicate su
 
 ## Known limitations and remaining work
 
-- Browser testing has not yet been performed.
+- Browser coverage is limited to the primary group payment workflow described above. Direct payments, overpayments, duplicate submissions, and other cases outside the reported observations remain untested in the browser.
 - SQLite's trigger and transaction behavior is covered by the temporary-database tests; no production multi-process load test was run.
 - The project has no payment editing or deletion workflow; this is intentional for the immutable payment ledger.
 - This report does not claim that Lab 9 is complete. Phase 5F and Phase 5G remain out of scope.
