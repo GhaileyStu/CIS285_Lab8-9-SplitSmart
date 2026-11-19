@@ -56,7 +56,7 @@ export function BalanceOverview({ summaries }: { summaries: Overview }) {
     <div className="section-heading"><div><span className="eyebrow">CURRENT NET BALANCES</span><h2 id="balance-overview-title">Group balances</h2></div><span className="round-icon peach">↔</span></div>
     <p className="panel-intro">Balances come from approved expenses and are netted per member pair. Currencies stay separate.</p>
     {summaries.length === 0 ? <p className="balance-empty">Join or create a group to see your balances.</p> : <div className="balance-summary-grid">{summaries.map((group) => <Link className="balance-summary-card" href={`/?group=${encodeURIComponent(group.id)}`} key={group.id}>
-      <span className="balance-summary-heading"><strong>{group.name}</strong><small>{group.currencyCode}</small></span>
+      <span className="balance-summary-heading"><strong>{group.name}</strong></span>
       <span className="balance-summary-net">{group.netPosition}</span>
       <span className="balance-summary-lines"><span>Owed to you <b>{group.owedToMe}</b></span><span>You owe <b>{group.iOwe}</b></span><span>Group outstanding <b>{group.outstandingTotal}</b></span></span>
       <span className="balance-summary-link">Open group balances →</span>

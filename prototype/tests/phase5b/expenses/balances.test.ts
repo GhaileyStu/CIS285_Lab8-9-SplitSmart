@@ -3,10 +3,13 @@ import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { join, resolve } from "node:path";
 import { createExpense } from "../../../src/features/phase5a/expenses/create-expense";
 import { decideGroupExpense } from "../../../src/features/phase5b/expenses/approvals";
 import { getGroupBalanceDetails, listBalanceSummariesForUser, listFormerPersonalBalances } from "../../../src/features/phase5b/expenses/balances";
+import { BalanceOverview } from "../../../src/features/phase5b/ui/balance-dashboard";
 import { listGroupExpenses } from "../../../src/features/phase5b/expenses/history";
 import { createGroup, deactivateGroupMember, addGroupMember } from "../../../src/features/phase5b/groups/service";
 
@@ -151,6 +154,14 @@ describe("Phase 5D balance queries", () => {
     const overview = await listBalanceSummariesForUser(usd.member.id, prisma);
     expect(overview.map((row) => [row.currencyCode, row.outstandingTotal]).sort()).toEqual([["CAD", "CAD 1.50"], ["USD", "USD 6.00"]]);
     expect(overview.find((row) => row.currencyCode === "USD")?.netPosition).toBe("USD 6.00 you owe");
+    const markup = renderToStaticMarkup(createElement(BalanceOverview, { summaries: overview }));
+    expect(markup).not.toMatch(/<small>(USD|CAD)<\/small>/);
+    for (const summary of overview) {
+      expect(markup).toContain(summary.netPosition);
+      expect(markup).toContain(`<b>${summary.owedToMe}</b>`);
+      expect(markup).toContain(`<b>${summary.iOwe}</b>`);
+      expect(markup).toContain(`<b>${summary.outstandingTotal}</b>`);
+    }
   });
 
   it("denies nonmembers and limits former participants to their own historical pair rows", async () => {

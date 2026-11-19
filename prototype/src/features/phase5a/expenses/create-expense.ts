@@ -78,7 +78,8 @@ function requireText(value: string, field: string): string {
 
 function parseExpenseDate(value: Date | string): Date {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
-  if (!Number.isFinite(date.getTime())) {
+  const isCalendarDate = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+  if (!Number.isFinite(date.getTime()) || (isCalendarDate && date.toISOString().slice(0, 10) !== value)) {
     throw new ExpenseCreationError("INVALID_INPUT", "Expense date is invalid.");
   }
   return date;
