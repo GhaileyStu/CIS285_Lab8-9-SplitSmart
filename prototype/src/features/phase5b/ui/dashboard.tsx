@@ -4,9 +4,10 @@ import { addMemberAction, createGroupAction, deactivateMemberAction, updateGroup
 import { approveGroupExpenseAction, createGroupExpenseAction, rejectGroupExpenseAction } from "../actions/expenses";
 import { logoutAction } from "../actions/auth";
 import { SubmitButton } from "./submit-button";
-import { BalanceOverview, FormerPersonalBalancePanel, GroupBalancePanel } from "./balance-dashboard";
+import { BalanceOverview, DirectBalancePanel, FormerPersonalBalancePanel, GroupBalancePanel } from "./balance-dashboard";
 import { getCurrentUser } from "../auth/session";
 import { getGroupBalanceDetails, listBalanceSummariesForUser, listFormerPersonalBalances } from "../expenses/balances";
+import { listDirectBalancesForUser, listDirectPaymentsForUser, listFormerGroupPayments, listGroupPayments } from "../expenses/payments";
 import { listFormerParticipantPendingDecisions, listGroupExpenses } from "../expenses/history";
 import { listGroupsForUser } from "../groups/service";
 
@@ -89,10 +90,18 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const groups = await listGroupsForUser(user.id);
   const balanceSummaries = await listBalanceSummariesForUser(user.id);
   const formerBalances = await listFormerPersonalBalances(user.id);
+  const directBalances = await listDirectBalancesForUser(user.id);
+  const directPayments = await listDirectPaymentsForUser(user.id);
+  const formerPayments = await listFormerGroupPayments(user.id);
   const formerDecisions = await listFormerParticipantPendingDecisions(user.id);
   const selected = groups.find((group) => group.id === params.group);
-  const history = selected ? await listGroupExpenses(user.id, selected.id) : null;
-  const groupBalances = selected ? await getGroupBalanceDetails(user.id, selected.id) : null;
+  const [history, groupBalances, groupPayments] = selected
+    ? await Promise.all([
+      listGroupExpenses(user.id, selected.id),
+      getGroupBalanceDetails(user.id, selected.id),
+      listGroupPayments(user.id, selected.id),
+    ])
+    : [null, null, []];
   const totalExpenses = groups.reduce((sum, group) => sum + group._count.expenses, 0);
   const totalMembers = groups.reduce((sum, group) => sum + group.memberships.length, 0);
   return <main className="app-shell">
@@ -114,7 +123,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <section className="welcome-row"><div><span className="eyebrow">YOUR SHARED SPACES</span><h1>Good to see you, {user.displayName.split(" ")[0]} <span className="wave">✳</span></h1><p>Here’s a little snapshot of your shared spending.</p></div><a href="#new-group" className="button button-dark">Create a group <span>＋</span></a></section>
           <section className="stat-grid"><div className="stat-card"><span className="stat-icon mint">▦</span><span className="stat-label">YOUR GROUPS</span><strong>{groups.length.toString().padStart(2, "0")}</strong><small>Active shared spaces</small></div><div className="stat-card"><span className="stat-icon lavender">♙</span><span className="stat-label">MEMBERS</span><strong>{totalMembers.toString().padStart(2, "0")}</strong><small>Across your groups</small></div><div className="stat-card"><span className="stat-icon peach">↗</span><span className="stat-label">RECORDED EXPENSES</span><strong>{totalExpenses.toString().padStart(2, "0")}</strong><small>Saved to your history</small></div></section>
           <BalanceOverview summaries={balanceSummaries}/>
-          <FormerPersonalBalancePanel balances={formerBalances}/>
+          <DirectBalancePanel balances={directBalances} payments={directPayments} currentUserId={user.id}/>
+          <FormerPersonalBalancePanel balances={formerBalances} payments={formerPayments} currentUserId={user.id}/>
           <section className="workspace-grid"><div className="panel groups-panel"><div className="section-heading"><div><span className="eyebrow">SHARED SPACES</span><h2>Your groups <span className="heading-count">{groups.length}</span></h2></div><span className="round-icon">▦</span></div>
             {groups.length === 0 ? <div className="empty-state"><span className="empty-illustration">✳</span><h3>Your first group starts here</h3><p>Bring your household, trip, or dinner crew together in one shared space.</p><a className="text-link" href="#new-group">Create your first group →</a></div> : <div className="group-cards">{groups.map((group, index) => <a className="group-card" href={`/?group=${encodeURIComponent(group.id)}`} key={group.id}><span className={`group-emblem dot-${index % 4}`}>{initials(group.name)}</span><div className="group-card-copy"><strong>{group.name}</strong><small>{group.memberships.length} members <span>·</span> {group.currencyCode}</small></div><span className="card-arrow">↗</span></a>)}</div>}
           </div><div className="panel create-panel" id="new-group"><div className="section-heading"><div><span className="eyebrow">START SOMETHING TOGETHER</span><h2>Create a group</h2></div><span className="round-icon peach">＋</span></div><p className="panel-intro">Set up a shared space for people, plans, and everyday expenses.</p><form className="stack-form" action={createGroupAction}><label>Group name<input name="name" placeholder="e.g. Maple Street House" required maxLength={80}/></label><label>Currency<select name="currencyCode" defaultValue="USD"><option value="USD">USD · US Dollar</option><option value="CAD">CAD · Canadian Dollar</option><option value="EUR">EUR · Euro</option><option value="GBP">GBP · British Pound</option><option value="AUD">AUD · Australian Dollar</option><option value="NZD">NZD · New Zealand Dollar</option></select></label><SubmitButton pendingLabel="Creating group…">Create group <span>→</span></SubmitButton></form><div className="owner-note"><span>✦</span> You’ll be the owner and first member.</div></div></section>
@@ -130,7 +140,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               </form>
             </div>
           </section>
-          {groupBalances && <GroupBalancePanel details={groupBalances}/>}
+          {groupBalances && <GroupBalancePanel details={groupBalances} currentUserId={user.id} payments={groupPayments}/>}
           <section className="panel history-panel"><div className="section-heading"><div><span className="eyebrow">THE PAPER TRAIL</span><h2>Expense history <span className="heading-count">{history?.expenses.length ?? 0}</span></h2></div><span className="round-icon">↗</span></div>
             <p className="balance-status-note"><strong>Balance effect:</strong> approved expenses contribute to the current projection. Pending expenses await participant decisions; rejected expenses do not affect balances.</p>
             {!history?.expenses.length ? <div className="empty-history"><span>◷</span><div><strong>No expenses here yet</strong><p>Saved expenses and each person’s share will appear here.</p></div></div> : <div className="expense-list">{history.expenses.map((expense)=><ExpenseCard key={expense.id} expense={expense} currency={history.group.currencyCode} userId={user.id}/>)}</div>}

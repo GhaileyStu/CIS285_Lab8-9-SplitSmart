@@ -10,6 +10,11 @@ function amount(cents: bigint, currencyCode: string) {
   return `${currencyCode} ${(absolute / HUNDRED).toLocaleString("en-US")}.${(absolute % HUNDRED).toString().padStart(2, "0")}`;
 }
 
+function decimal(cents: bigint) {
+  const absolute = cents < ZERO ? -cents : cents;
+  return `${absolute / HUNDRED}.${(absolute % HUNDRED).toString().padStart(2, "0")}`;
+}
+
 type Totals = { owedToMe: bigint; iOwe: bigint; net: bigint; outstanding: bigint };
 
 function summarize(rows: readonly { userLowId: string; userHighId: string; signedBalanceCents: bigint }[], userId: string): Totals {
@@ -82,9 +87,13 @@ export async function getGroupBalanceDetails(userId: string, groupId: string, cl
     const creditor = lowOwes ? row.userHigh : row.userLow;
     return {
       id: row.id,
+      scopeId: scope?.id ?? "",
+      debtorUserId: debtor.id,
+      creditorUserId: creditor.id,
       debtorName: debtor.displayName || debtor.username,
       creditorName: creditor.displayName || creditor.username,
       amount: amount(row.signedBalanceCents, group.currencyCode),
+      amountInput: decimal(row.signedBalanceCents),
       involvesCurrentUser: debtor.id === userId || creditor.id === userId,
     };
   });
@@ -121,12 +130,16 @@ export async function listFormerPersonalBalances(userId: string, client: PrismaC
       const counterparty = debtor.id === userId ? creditor : debtor;
       return {
         id: row.id,
+        scopeId: scopesByGroup.get(group.id)?.id ?? "",
+        debtorUserId: debtor.id,
+        creditorUserId: creditor.id,
         groupName: group.name,
         currencyCode: group.currencyCode,
         debtorName: debtor.displayName || debtor.username,
         creditorName: creditor.displayName || creditor.username,
         counterpartyName: counterparty.displayName || counterparty.username,
         amount: amount(row.signedBalanceCents, group.currencyCode),
+        amountInput: decimal(row.signedBalanceCents),
       };
     });
     const totals = summarize(rows, userId);
