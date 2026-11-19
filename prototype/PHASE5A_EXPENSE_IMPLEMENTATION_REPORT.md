@@ -1,7 +1,7 @@
 # SplitSmart Lab 9 — Phase 5A Expense Allocation and Creation Review
 
-**Date:** 2026-11-19  
-**Branch:** `feature/splitsmart-prototype`  
+**Date:** 2026-11-18
+**Branch:** `feature/splitsmart-prototype`
 **Status:** Phase 5A allocation and expense creation are implemented. The recorded automated checks passed. This report is a guided review of the delivered scope and its boundaries.
 
 ## 1. Phase goal and boundary
@@ -109,13 +109,42 @@ The Phase 4 database at `prototype/prisma/dev.db` was not used by the tests, res
 
 ## 9. Final working-tree status
 
-The `git status --short --branch` check after this report expansion was:
+At the final verification on 2026-11-18, `git status --short --branch` was:
 
 ```text
 ## feature/splitsmart-prototype...origin/feature/splitsmart-prototype
- M prototype/PHASE5A_EXPENSE_IMPLEMENTATION_REPORT.md
-?? prototype/src/lib/
 ```
 
-`git diff --check` passed after the report update. This turn changed only this report; the untracked `prototype/src/lib/` tree contains the Phase 5A implementation and tests listed above. Nothing was staged, committed, or pushed.
+There were no staged, modified, or untracked files at that verification. The earlier status snapshot from the original implementation report is superseded by this current clean status.
+
+## 10. Independent final verification — 2026-11-18
+
+The implementation, tests, approved design, and source requirements were independently reviewed again. These checks completed successfully:
+
+| Check | Observed result |
+| --- | --- |
+| `npx vitest run` | Passed: 2 test files, 23 tests |
+| `npx tsc --noEmit` | Passed |
+| `npm run lint` | Passed |
+| `npx prisma validate` | Passed |
+| Prisma CLI and `@prisma/client` | Both 6.19.3 |
+| `git diff --check` | Passed |
+
+The verification found no inconsistency among the allocation implementation, its tests, and the approved design's ROUND_HALF_UP plus designated-residual policy. The tests explicitly reject negative-share residual cases, matching the design's documented limitation.
+
+### Source-requirement gaps to retain for follow-up
+
+- The SplitSmart specification literally requires `BigDecimal`. The TypeScript implementation uses exact `BigInt` rational arithmetic and reproduces the specified rounding without floating point, but does not use that named type. This is a technology-wording discrepancy to resolve for the TypeScript implementation context.
+- The source requires valid approved allocations to reconcile. Under the specified independent rounding and designated residual rule, some positive amounts with valid percentages (and some small equal splits) would make the designated share negative. The implementation rejects those inputs to preserve the schema's nonnegative-share constraint. This limitation is explicitly documented and tested, but means those cases are not accepted.
+- Group creator, payer, and participants are all required by the approved design to be active members. The specification explicitly requires a group creator/member and active participants, but does not expressly require an excluded payer to be a member; the design identifies the payer condition as the stricter prior decision.
+
+### Database verification
+
+The tests use an isolated SQLite file created in the system temporary directory and remove it afterward. No migration or database-changing command was run. The development database `prototype/prisma/dev.db` had SHA-256 `107b9b2fb10f65795c18292594e2f1d1826a407581edb93294d7abbab665cd5c` and size 405,504 bytes during final verification, matching the hash recorded in the earlier report. No verification command targeted that database.
+
+### Remaining Lab 9 work
+
+The Next.js routes still consist only of the starter home page, layout, and global stylesheet; no interactive application UI or API/server actions are present. Remaining work includes local account authentication, group and member management, expense entry and history UI, group approval/rejection, group balance views, payment settlement, reports and date filters, notifications, receipt handling, and responsive web UI. Android and iOS remain broader product requirements beyond this web prototype.
+
+Recommended next implementation phase: build an authenticated interactive vertical slice for account access, group/member management, and expense creation/history. Follow with approval and group balances, then payment settlement and reports. This report update does not authorize or begin that implementation.
 
