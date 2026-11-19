@@ -66,6 +66,19 @@ Use existing data for read-only checks. Use a disposable environment if a scenar
 4. Check an empty period and a reversed range, then try a partial or malformed range through the URL. Try an unavailable group URL as a nonmember and former member, and visit the page while signed out. Verify that unauthorized records and balances are absent.
 5. At a narrow viewport, tab through the controls and check that rows and amounts remain readable. Throttle navigation to check the loading state. In a disposable environment, simulate a data-load failure and verify that Try again recovers once access is restored.
 
+## User-reported browser verification
+
+The user reported a successful browser check for **Maple Street House** on **November 19, 2026 (UTC)**. This was user-reported evidence and was not independently executed by the agent.
+
+| Report item | Observed result |
+| --- | --- |
+| Gross approved expenses | USD 260.00 |
+| Payments | USD 20.00 |
+| Current outstanding | USD 155.00 |
+| Rejected Uber expense | Excluded from gross approved expenses |
+| TestUser2 outstanding | USD 125.00 |
+| TestUser3 outstanding | USD 30.00 |
+
 ## Known limitations and completion
 
-Manual browser checks were not run. Automated coverage includes server-rendered output, with browser interaction and layout covered by the manual instructions. Report results are rendered as full matching lists, so large date ranges can return many rows. Historical as-of balances would require a separate reconstruction policy. Phase 5F is implemented and the required automated checks passed. Phase 5G was not started.
+Automated coverage includes server-rendered output. Browser evidence is limited to the user-reported group walkthrough above. Other browser cases are listed in the manual instructions. Report results are rendered as full matching lists, so large date ranges can return many rows. Historical as-of balances would require a separate reconstruction policy. Phase 5F is implemented and the required automated checks passed. Phase 5G was not started.
