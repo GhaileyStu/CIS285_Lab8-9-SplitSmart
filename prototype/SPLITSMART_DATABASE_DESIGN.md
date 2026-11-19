@@ -8,7 +8,7 @@
 
 - Immutable revisions, shares, approval decisions, reversals, reversal entries, and payments are the financial audit source.
 - `Expense.status`, `Expense.currentBalanceScopeId`, and `PairwiseObligation` are mutable current-state projections. They must be rebuildable from source records.
-- A group expense's creator must be a group member, and each participant must be an active member when the relevant revision is submitted. The source specification does not require a payer who is not a participant to be a group member; whether to impose that additional restriction remains a product decision. A direct expense contains exactly two distinct users across payer and participants; its authenticated creator must be one of them. Direct accounting scopes are currency-specific: the same unordered pair may have independent scopes in multiple currencies, and values from different currencies are never combined.
+- Confirmed prior design decision (stricter than the source minimum): a group expense creator, payer, and every participant must be active members of that group when the revision is submitted. The source requires the creator to be a group member and participants to be active members, but does not explicitly require an excluded payer to be an active member. A direct expense contains exactly two distinct users across payer and participants; its authenticated creator must be one of them. Direct accounting scopes are currency-specific: the same unordered pair may have independent scopes in multiple currencies, and values from different currencies are never combined.
 - Deletion must not cascade through financial history. Financial owners are retained; correction uses reversal and replacement.
 - Prisma represents relational shape and common uniqueness. SQL checks and triggers supplement Prisma where SQLite supports constraints Prisma schema cannot express. Server-side transactional validation remains required for rules spanning multiple rows.
 
@@ -102,7 +102,7 @@ All string IDs use `String @id @default(cuid())` unless stated otherwise. `DateT
 - `createdByUserId String` — required FK to User.
 - `currentRevisionNumber Int` — required projection selecting the latest revision.
 - `currentBalanceScopeId String?` — optional FK to BalanceScope; **current-state projection only** and not the authoritative accounting scope.
-- `status String` — required projection: `PENDING`, `APPROVED`, `REJECTED`, or `REVERSED`.
+- `status String` — required projection: `PENDING`, `APPROVED`, `REJECTED`, or `REVERSED`. Group expenses start PENDING. Under the proposed prototype default direct expenses start APPROVED; if direct participant review is selected they start PENDING.
 - `createdAt DateTime`, `updatedAt DateTime` — required.
 - Relations: creator, optional group, optional current scope projection, revisions, notifications.
 - Indexes: `(groupId, createdAt)`, `(createdByUserId, createdAt)`, `(status, createdAt)`, `(currentBalanceScopeId)`.
@@ -155,6 +155,7 @@ All string IDs use `String @id @default(cuid())` unless stated otherwise. `DateT
 - `createdByUserId String` — required FK to User.
 - `replacementExpenseId String?` — optional FK to replacement Expense, unique when nonnull.
 - `reason String`, `createdAt DateTime` — required.
+- A committed Reversal row represents a finalized reversal only. Create the Reversal, its complete entry set, projection updates, replacement (if any), and final consistency checks in one transaction; never commit a partial or unfinalized reversal.
 - Relations: original revision, creator, optional replacement, reversal entries.
 - `onDelete`: `Restrict` from original revision, creator, replacement, and entries.
 - Reversal entries below explicitly record every inverse payer/participant obligation for each non-payer source share with nonzero cents. A reversal cannot finalize unless it has exactly one such entry for every eligible source share and no entry for any other share.
@@ -194,7 +195,7 @@ All string IDs use `String @id @default(cuid())` unless stated otherwise. `DateT
 - `id String` — PK.
 - `balanceScopeId String` — required FK to BalanceScope.
 - `debtorUserId String`, `creditorUserId String`, `recordedByUserId String` — required FKs to User; `recordedByUserId` must equal debtor.
-- `amountCents BigInt` — required and > 0.
+- `amountCents BigInt` — required and > 0 under the proposed prototype validation default. The source requires no overpayment but leaves zero/negative payment treatment open.
 - `idempotencyKey String`, `requestHash String` — required. Idempotency key unique; request hash is a canonical fingerprint of scope, debtor, creditor, amount, currency, and payment date.
 - `paymentDate DateTime`, `createdAt DateTime` — required.
 - Relations: scope, debtor, creditor, recorder.
@@ -240,7 +241,7 @@ SQLite permits multiple NULL values in unique indexes, so the scope uniqueness i
 ### SQL `CHECK` constraints
 
 - Expense revision `amountCents > 0`.
-- Payment `amountCents > 0`.
+- Payment `amountCents > 0` under the proposed prototype validation default; the source leaves zero/negative settlement treatment open.
 - Expense share `shareCents >= 0`; zero is allowed.
 - Percentage basis points are null or between 0 and 10,000.
 - Allowed values for scope kind, expense kind/status, split method, membership status/role, invitation status, approval decision, and notification kind.
@@ -254,8 +255,9 @@ Cross-row percentage totals and share sum are verified in the server transaction
 ### Custom SQLite triggers
 
 - **Membership periods:** reject overlapping half-open periods `[joinedAt, leftAt)` for the same membership. Allow closing an open period once; disallow changing its start, reopening it, or changing a closed end. Rejoin inserts a new period after the old period is closed.
-- **Revision/scope consistency:** require revision scope kind and group to match its parent Expense. The revision’s scope is immutable. A trigger on Expense current-revision/current-scope projection updates verifies that the selected latest revision exists and its scope matches the projection.
-- **Approval validity:** before inserting an Approval, require its participant to have an ExpenseShare on that exact revision; require that revision to be the current highest revision number and the Expense projection to be PENDING. This blocks nonparticipants and approvals on superseded revisions. Unique `(revisionId, participantUserId)` prevents duplicate decisions.
+- **Revision/scope consistency:** require revision scope kind, group, and currency to match its parent Expense and BalanceScope. The revision’s scope is immutable. A trigger on Expense current-revision/current-scope projection updates verifies that the selected latest revision exists and its scope matches the projection.
+- **Group currency:** under the proposed prototype default, reject a Group.currencyCode update after the group has any financial ExpenseRevision. A change before financial activity remains subject to supported-currency validation.
+- **Approval validity:** before inserting an Approval, require its participant to have an ExpenseShare on that exact revision; require that revision to be the current highest revision number and the Expense projection to be PENDING. For group expenses this is required by the source specification. If product selects participant review for direct expenses, the same exact-revision checks apply; under the proposed prototype default direct expenses are auto-approved and do not collect Approval rows. This blocks nonparticipants and approvals on superseded revisions. Unique `(revisionId, participantUserId)` prevents duplicate decisions.
 - **Scope/pair consistency:** a direct PairwiseObligation pair must equal its direct BalanceScope low/high users. Its scope fixes currency. A direct Payment debtor/creditor pair must be exactly those two users in either direction and the payment uses the scope currency. An Expense finalization trigger checks that a DIRECT revision’s union of payer and participants is exactly the scope’s two users, and that its creator is one of them. A GROUP revision must refer to the group scope for its Expense group and match the group currency.
 - **Reversal validity:** reject a reversal unless its source revision is approved, has not already been reversed, and each ReversalEntry references a non-payer source share from that revision with nonzero shareCents, uses its payer/participant direction and original currency-specific scope, and matches that share amount. At finalization require an exact set match: one entry per non-payer source share with nonzero cents, no missing or extra entries. Unique `(reversalId, sourceShareId)` prevents duplicates; a finalization trigger or server transaction checks completeness.
 - **Money overflow safety:** before aggregating or updating projections, validate all amounts and results using arbitrary-precision integer intermediates. Reject any amount, sum, delta, reversal, payment, or rebuild result outside signed 64-bit range before SQLite arithmetic can overflow. The proposed maximum per monetary amount is `9,223,372,036,854,775,807` cents; this cap and currency-specific product limits require final product confirmation.
@@ -269,12 +271,14 @@ Prisma schema can express scalar types, required/optional fields, FKs, relations
 
 The server must transactionally validate:
 
-- Authenticated actor and group membership of the group-expense creator, plus active membership of each group participant, at submission/revision creation. The specification does not explicitly require an excluded payer to be a group member; enforce that only if product confirms it.
+- Authenticated actor and active group membership of group-expense creator, payer, and participants at submission/revision creation, following the confirmed stricter design decision in Section 11. The source itself explicitly requires the creator to be a group member and participants to be active; payer membership is a stricter prior design rule.
 - Direct expense's two-user set and creator membership in that set.
 - Use `BigDecimal` with `ROUND_HALF_UP` to two decimal places for all application-layer monetary calculations, including allocations, balance/payment validation, and report totals, as required by NFR-002. Equal and percentage allocations are calculated in base-10 decimal arithmetic; percentages are represented as basis points and must total exactly 10,000. Round each participant allocation to two decimal places, then apply the full residual needed to make shares equal the expense total to the payer if the payer is a participant, otherwise to the first participant in the submitted participant order. Persist only validated two-decimal results as integer cents. Preserve submitted participant order in immutable share rows so “first participant” is reproducible. Use no binary floating point. Convert checked BigDecimal results to integer cents at persistence boundaries; SQL and stored integer-cent ledger deltas enforce exactness and signed 64-bit bounds without introducing monetary rounding.
 - Currency consistency across scope, group, revision, reversal entry, payment, and source events. A direct expense reuses or transactionally creates the scope for the unordered pair plus currency. Never add or report totals across currencies without an explicit conversion rule; payments settle only within the same currency scope.
+- Enforce the configured supported-currency allowlist and two-decimal precision policy. Under the proposed owner-only prototype permission default, only the group owner can invite users or change membership/settings; all authorization is checked server-side. Validate report start/end ordering and use the approved timezone policy when product confirms it.
 - Checked arbitrary-precision intermediate arithmetic and signed 64-bit bounds before every persisted sum, delta, and projection update.
 - Approval decision belongs to participant on exact current revision; all approvals are required for approval; any rejection blocks approval.
+- Under the proposed direct auto-approval default, direct submission, `APPROVED` state, and its obligation updates commit in one transaction. If direct participant review is selected, submission is `PENDING` with no balance effect; the final approval applies obligations atomically, while any rejection leaves it ineffective.
 - State transition from PENDING occurs conditionally and only once. The final approval and all affected PairwiseObligation updates commit in one transaction.
 - Payment scope, debtor, creditor, active/authorized actor, idempotency payload, and sufficient outstanding balance. Conditional projection update and Payment insert occur in one SQLite transaction.
 - Former-member access uses MembershipPeriod and the creator/payer/participant relationship to authorize historical records and settlement; it does not use active membership as the sole rule for settling historical obligations. Proposed default: former participants may approve or reject only the exact pending revision in which they participated, even after leaving, but cannot create new group expenses.
@@ -283,17 +287,17 @@ The server must transactionally validate:
 
 ## 5. Accounting, reversal, and payment behavior
 
-For every approved revision, each participant other than the payer owes their full share to the payer. The payer’s own share creates no obligation. Each nonzero participant obligation updates the payer/participant pair in that revision’s `balanceScopeId`; the group-wide signed positions sum to zero.
+For every effective approved revision, each participant other than the payer owes their full share to the payer. The payer’s own share creates no obligation. Each nonzero participant obligation updates the payer/participant pair in that revision’s `balanceScopeId`; the group-wide signed positions sum to zero. Group revisions become effective only after all participants approve. Direct revisions are immediately approved under the **proposed prototype default**; if product instead requires participant review for direct expenses, they remain pending, create no obligations, and contribute nothing to balances until all participants approve.
 
 A reversal reverses **every** original non-payer participant obligation with a nonzero share, not just a net expense total. For each eligible original share, create exactly one ReversalEntry with the original debtor (participant), creditor (payer), currency-specific scope, and share cents. Zero-cent shares and the payer's own share produce no entry. Reject incomplete, duplicate, or extra entries at finalization. Apply the exact inverse signed delta to each pair and check signed 64-bit bounds. If previous payments settled some or all of an obligation, the signed pair balance may cross zero: e.g. a $30 debt paid by $10 leaves $20; reversing the full $30 yields $10 in the opposite direction. A fully paid $30 debt reverses to $30 in the opposite direction. All values in an example belong to one currency scope.
 
-Reversal record, complete ReversalEntry set, projection inverse updates, and replacement Expense/Revision/Shares are committed atomically. A group replacement remains pending and creates no obligation until approved. A direct replacement is immediately effective under the direct-expense approval rule, so its new obligations are applied in the same transaction as reversal and replacement creation. If validation fails or arithmetic would overflow, the entire correction transaction rolls back.
+Reversal record, complete ReversalEntry set, projection inverse updates, and replacement Expense/Revision/Shares are committed atomically. A group replacement remains pending and creates no obligation until approved. Under the proposed prototype default, a direct replacement is immediately approved and its new obligations are applied in the same transaction as reversal and replacement creation. If direct participant review is selected, the direct replacement remains pending and creates no obligation until approval. If validation fails, reversal entries are incomplete, or arithmetic would overflow, the entire correction transaction rolls back and the reversal cannot finalize.
 
 Payments aggregate against the scope/user pair balance, not against an individual expense. Each payment remains separately recorded and reportable. Idempotency key plus canonical request hash protects retries. Concurrent requests use a conditional update against the latest signed amount and SQLite’s serialized writer; the payment row and projection change either both commit or neither commits.
 
 ## 6. Approval, membership history, and historical access
 
-Approvals target an exact ExpenseRevision and a user with a matching ExpenseShare. New Approval rows are rejected if the revision is not the current highest revision, so superseded revisions cannot receive decisions. Only a participant decision on a current pending group revision counts. A conditional PENDING-to-APPROVED/REJECTED transition ensures that rejection prevents approval, and approval obligations are applied once.
+Approvals target an exact ExpenseRevision and a user with a matching ExpenseShare. New Approval rows are rejected if the revision is not the current highest revision, so superseded revisions cannot receive decisions. Group revisions require participant approval as specified. Direct revisions are auto-approved only under the proposed prototype default; if direct review is selected, participant decisions on that exact pending revision govern approval/rejection in the same way. A conditional PENDING-to-APPROVED/REJECTED transition ensures that rejection prevents approval, and approval obligations are applied once.
 
 Membership periods are half-open intervals. A trigger rejects overlap for the same GroupMembership. Deactivation closes the open interval. Rejoining reactivates the membership projection and inserts a new non-overlapping period, preserving old periods.
 
@@ -305,7 +309,7 @@ Former members retain access only to historical records where they were creator,
 
 For each scope and unordered pair within that scope's single currency, recompute the signed amount as:
 
-1. Add obligations from each effective approved revision: all direct revisions are approved immediately; a group revision is effective only if every share participant has an APPROVE record on that revision and no participant rejected it.
+1. Add obligations from each effective approved revision. A group revision is effective only if every share participant has an APPROVE record on that revision and no participant rejected it. Under the proposed prototype default, direct revisions are immediately approved and effective. If direct participant review is selected, a direct revision is effective only after all participants approve it; pending or rejected direct revisions contribute no obligation.
 2. Subtract the original obligations represented by each ReversalEntry.
 3. Apply each Payment in its recorded debtor-to-creditor direction, reducing the signed balance toward zero or, if a later reversal changes the net direction, applying the payment ledger delta exactly as recorded.
 
@@ -367,46 +371,64 @@ Proposed sequence, only after approval:
 - **Direct-pair currency:** separate direct balances per unordered user pair and currency. Scope identity is `(directLowUserId, directHighUserId, currencyCode)`. Expenses and payments use the matching currency-specific scope; balances are never combined across currencies. Group expenses continue to use the group's configured currency.
 - **Financial correction:** approved expense revisions cannot be edited. Correct them through reversal and replacement.
 - **Reversal completeness:** finalization requires exactly one reversal entry for every non-payer source share with nonzero cents; missing, duplicate, and extra entries are rejected.
+- **Group payer membership:** group expense creator, payer, and participants are all required to be active group members at submission. This retains the prior stricter design decision; the source expressly requires group creator membership and active participants but does not expressly state the payer condition.
 - **Former members:** historical access and settlement of authorized historical obligations remain available. Former members cannot create new group expenses.
 
 ### Proposed defaults requiring final product confirmation
 
 - **Money limits:** cap each nonnegative monetary amount at SQLite's signed 64-bit maximum (`9,223,372,036,854,775,807` cents), with signed projection range checks and checked arbitrary-precision intermediate arithmetic. Confirm this product-level maximum and whether lower per-currency limits are needed.
-- **Approval after leaving:** former members may approve or reject the exact pending revision in which they participated, even after leaving the group.
-- **Reversal permissions:** group expense reversal requires the group owner or original expense creator; direct expense reversal requires an involved user (creator, payer, or participant).
-- **Report dates:** interpret dates in the viewer's local timezone and convert to UTC start-inclusive/end-exclusive query boundaries. Confirm how the viewer's timezone is selected and retained.
-- **Username normalization:** Unicode NFKC followed by locale-independent Unicode default case-folding, with uniqueness on the canonical value. Confirm compatibility policy, Unicode version pinning, and whether display spelling is stored separately.
+- **Direct-expense approval:** source documents leave participant review open. Proposed prototype default: direct expenses are immediately approved on creation. If review is selected, direct expenses remain pending, produce no balance effect until every participant approves, and rejected/pending revisions are excluded from reversals and projection rebuilds; only an approved direct expense may be reversed.
+- **Group currency changes:** proposed default is to make a group currency immutable after the first financial revision. For a different currency, create a new group or require an explicit migration that preserves the original scope and currency for every historical revision; do not retarget existing revisions.
+- **Supported currency catalog:** proposed scope is currencies compatible with two-decimal amounts because the source mandates two-decimal rounding and this design persists integer cents; confirm the catalog.
+- **Account/group deletion:** proposed default is soft deactivation and no hard deletion while financial/history references exist. Retention duration and erasure policy remain open.
+- **Receipt handling:** proposed maximum is 5 MB; formats, retention, and SQLite versus private external storage remain open.
+- **Account recovery and detailed group permissions:** proposed prototype default is owner-only group settings/membership administration. Recovery workflow and delegated roles are not specified by the source.
+- **Report dates:** proposed interpretation is viewer-local dates converted to UTC start-inclusive/end-exclusive bounds. Confirm timezone source; extra report parameters are unspecified.
+- **Settlement validation:** debtor-only partial/full payments and no overpayment are source requirements. Positive-only payment amounts are a proposed validation default.
+- **Username normalization:** Unicode NFKC plus locale-independent case-folding is a proposed canonicalization policy; confirm compatibility and Unicode version.
+- **Former-member decisions and reversal permissions:** proposed defaults allow a former participant to decide only the exact pending revision they participated in; group reversal by owner or original creator; direct reversal by an involved user.
 
-### Still unresolved
+### Unresolved product decisions
 
-1. **Hard deletion and retention:** financial history must not cascade-delete. Account/group deletion and retention duration are unspecified; this design disallows hard deletion where financial/history references exist.
-2. **Direct-expense approval:** the requirements/specification leaves open whether direct one-to-one expenses require participant review; this proposal currently treats direct expenses as immediately approved, pending product confirmation.
-3. **Supported currencies and group currency changes:** the requirements do not enumerate supported currencies or define whether/how a group's configured currency can change after expenses exist. A currency change must not reinterpret historical amounts.
-4. **Other product questions from the source requirements:** account recovery, invitation/group permissions, notification delivery/channels, extra report parameters, receipt formats/retention, platform rollout, and settlement validation policy remain subject to their source-of-truth open questions.
+1. Direct-expense approval: the specification leaves this open; the immediate-approval default and review alternative are described in Section 5.
+2. Supported currency catalog, group currency changes, account/group erasure and retention duration, account recovery, delegated group roles, notification failure and future channels, additional report filters and timezone source, receipt formats/storage/retention, zero/negative payment treatment, and proposed permission defaults.
 
-## 12. Git state at review
+### Deferred future-product capabilities
 
-Branch and `git status --short` were inspected read-only before creating this design document:
+- Android/iOS clients, push and other web/mobile notification channels, account recovery, expanded report filters, delegated group roles, and cross-currency conversion are outside this database prototype. FR-010 remains a complete-product requirement; this database prototype does not satisfy it by itself.
 
-- Branch: `feature/splitsmart-prototype`.
-- `git status --short`: empty (clean at inspection time).
+## 12. Source requirement reconciliation
 
-The new design document itself will appear as an untracked file after it is saved. No staging, commit, or push is authorized or performed.
+Compared this proposal with `UserRequirement.md` and `specs/001-expense-sharing/spec.md`, treating the specification as the authoritative elaboration of UserRequirement.md. The requirements checklist confirms that Open Questions remain available for clarification/planning; absence of [NEEDS CLARIFICATION] markers does not mean those questions have been decided.
 
-## 13. Final source-requirements correction pass (design only, 2026-11-18)
+### Explicit source requirements and exact gaps
 
-Compared this proposal with `UserRequirement.md` and `specs/001-expense-sharing/spec.md`. Corrections below bring the design into line with the source where it is explicit and identify product decisions that remain open.
+1. FR-003 requires the group expense creator to be a group member; FR-004 requires each group participant to be an active member. Neither says that an excluded payer must be a member. The prior stricter rule that creator, payer, and participants must all be active group members is retained as a confirmed design decision, clearly distinguished from source text. Recommended rule: retain it because it was previously established, it provides consistent group-scoped authorization for all expense actors, and it does not conflict with the source, while recognizing that the payer condition is stricter than the stated minimum.
+2. FR-005 explicitly requires participant approval for group expenses. AC-005 says direct expenses are recorded without group approval, but Open Question 2 explicitly asks whether direct expenses also need participant review. Direct-expense approval therefore remains a genuine product decision; the immediate-approval rule is only the proposed prototype default and its alternative effects are specified consistently in Sections 5–7.
+3. NFR-002 and AC-006 require BigDecimal, ROUND_HALF_UP to two decimals, and exact allocation reconciliation to the payer or first participant. The design uses that application calculation rule while persisting integer cents and enforcing checked 64-bit bounds.
+4. The source specifies group-configured currency and selected currency for a direct expense, but does not enumerate supported currencies or decide group currency changes. The separate direct pair/currency scope is a confirmed design decision; no cross-currency aggregation or implicit conversion is permitted.
+5. The source requires debtor-only payment and rejects overpayment; zero/negative payments remain open. It requires date-range reporting, but leaves extra filters/timezone unresolved. It also leaves receipt formats/size/retention, account recovery, detailed group roles, and notification delivery failures/future channels open.
 
-### Source requirements reflected in this correction pass
+### Platform scope
 
-1. Application-layer monetary calculations use `BigDecimal` and `ROUND_HALF_UP` to two decimal places; shares reconcile exactly, with the residual assigned to the payer when participating or otherwise to the first participant in submitted order (NFR-002, AC-006). Integer cents remain the persisted representation. Submitted participant order is retained for deterministic “first participant” selection, and ledger/projection deltas use checked exact integer-cent arithmetic.
-2. The Next.js/React/TypeScript database target is scoped to the repository application. The specification Java Swing MVP is a separate implementation subset; the complete product must support web, Android, and iOS, and a Swing MVP alone does not satisfy that requirement (FR-010 and Java Swing MVP Subset).
+The database target remains the existing Next.js/React/TypeScript application, SQLite, and Prisma 6.19.3. The specification separately defines a Java Swing MVP subset and states that the complete customer-requested product must support web, Android, and iOS; a Swing-only MVP does not satisfy FR-010.
 
-### Product decisions still requiring confirmation
+Notification cleanup is nonfinancial and cannot delete immutable financial history. This correction pass changes only this design document and does not authorize implementation.
 
-3. The specification requires the group expense creator to be a group member and participants to be active members; it does not expressly require an excluded payer to be a group member. This proposal does not impose that additional condition unless product confirms it.
-4. Supported currencies and whether all supported currencies use two decimal places. Integer-cent persistence assumes two-decimal units unless the schema is extended with a currency scale.
-5. Receipt formats, the proposed 5 MB size cap, and retention policy.
-6. The remaining questions in Section 11, including direct-expense approval, group currency changes, report parameters, account/group permissions, and notification delivery.
+## 13. Final Design Approval Checklist
 
-Notification cleanup is consistently treated as nonfinancial and cannot delete immutable financial history. The direct-pair multi-currency policy is consistent with the source assumption that direct expenses use a selected currency and do not imply cross-currency conversion. This correction pass changed only this design document; it did not alter source requirements or authorize implementation. Implementation remains on hold pending review and confirmation of the product decisions above.
+Database implementation remains on hold until the product owner confirms or accepts these proposed defaults:
+
+- [ ] Direct-expense approval: immediate approval for the prototype, or participant review.
+- [ ] Supported currency list, two-decimal currency restriction, and group currency immutability after financial activity.
+- [ ] Account/group erasure and retention duration, while preserving the prohibition on deleting referenced financial history.
+- [ ] Receipt formats, proposed 5 MB cap, storage location, and retention.
+- [ ] Account recovery and whether group management remains owner-only or delegated.
+- [ ] Notification failure handling and future web/mobile channels.
+- [ ] Report timezone source and additional report filters.
+- [ ] Rejection of zero/negative payments in addition to source-required debtor authorization and no overpayment.
+- [ ] Signed 64-bit monetary maximum and any lower product limits.
+- [ ] Username normalization compatibility/version policy.
+- [ ] Former-member approval and group/direct reversal permissions.
+
+The stricter active-group-payer rule remains a prior confirmed design decision; the source specification gap is documented in Section 12. No schema, migration, database, application, or dependency implementation is authorized until explicit approval.
