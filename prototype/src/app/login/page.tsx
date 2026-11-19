@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { loginAction, registerAction } from "@/app/actions/auth";
-import { SubmitButton } from "@/components/submit-button";
-import { getCurrentUser } from "@/lib/auth/session";
+import { loginAction, registerAction } from "@/features/phase5b/actions/auth";
+import { SubmitButton } from "@/features/phase5b/ui/submit-button";
+import { getCurrentUser } from "@/features/phase5b/auth/session";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string }> }) {
   const user = await getCurrentUser();

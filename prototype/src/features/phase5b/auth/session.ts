@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "../../../lib/prisma";
 
 const COOKIE_NAME = "splitsmart_session";
 const SESSION_DAYS = 7;

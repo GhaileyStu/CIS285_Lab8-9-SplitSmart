@@ -4,16 +4,16 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createExpense } from "../expenses/create-expense";
-import { listGroupExpenses } from "../expenses/history";
-import { authenticateAccount, registerAccount } from "../auth/accounts";
+import { createExpense } from "../../../src/features/phase5a/expenses/create-expense";
+import { listGroupExpenses } from "../../../src/features/phase5b/expenses/history";
+import { authenticateAccount, registerAccount } from "../../../src/features/phase5b/auth/accounts";
 import {
   addGroupMember,
   createGroup,
   deactivateGroupMember,
   listGroupsForUser,
   updateGroup,
-} from "./service";
+} from "../../../src/features/phase5b/groups/service";
 
 let prisma: PrismaClient;
 let testDirectory: string;

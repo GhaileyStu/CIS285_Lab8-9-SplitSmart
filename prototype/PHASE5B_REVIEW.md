@@ -32,30 +32,11 @@ Proposed sequence:
 
 This is a single local web prototype, not a production identity service. Account creation is open for demonstration; membership administration remains owner-only. Member addition selects an already registered account, so this slice does not claim to deliver or verify email invitations. External email, account recovery, and production deployment remain outside this phase.
 
-## 4. Exact files expected to change
+## 4. Phase and feature folder layout
 
-The following files were proposed for implementation after approval.
+Application/domain code is organized under `prototype/src/features/phase5a/` and `prototype/src/features/phase5b/`, with feature subfolders for expenses, auth, groups, actions, and UI. Next.js route entry points, shared layout, and global styles remain under `prototype/src/app/` as required by the App Router. Shared Prisma access remains under `prototype/src/lib/prisma.ts`.
 
-### Existing files
-
-- `prototype/src/app/page.tsx` — replace the starter page with the authenticated dashboard and group/expense views.
-- `prototype/src/app/layout.tsx` — set SplitSmart metadata and shared layout.
-- `prototype/src/app/globals.css` — responsive application styling.
-
-### New files
-
-- `prototype/src/app/login/page.tsx` — login and registration entry.
-- `prototype/src/app/actions/auth.ts` — registration, login, and logout actions.
-- `prototype/src/app/actions/groups.ts` — group and membership actions.
-- `prototype/src/app/actions/expenses.ts` — validated action calling Phase 5A `createExpense`.
-- `prototype/src/lib/auth/password.ts` — password hashing and verification helpers.
-- `prototype/src/lib/auth/session.ts` — session creation, lookup, revocation, and authenticated-user helper.
-- `prototype/src/lib/groups/service.ts` — authorized group creation, member management, and group queries.
-- `prototype/src/lib/expenses/history.ts` — authorized expense-history queries with participants and shares.
-- `prototype/src/components/` — focused form, navigation, and history components if the page structure warrants separation.
-- Tests alongside the new auth, group, and expense-history/action services.
-
-The plan does not call for changes to Phase 5A allocation or creation services, Prisma versions, or dependency manifests unless implementation uncovers a concrete need.
+All automated tests are separate from application source under `prototype/tests/phase5a/` and `prototype/tests/phase5b/`, grouped by feature. Phase 5B continues to reuse the Phase 5A expense creation service; no allocation or creation logic is duplicated.
 
 ## 5. Database changes
 
@@ -114,31 +95,22 @@ Strict boundaries: do not delete, reset, recreate, or overwrite the development 
 - No hard-delete action is exposed for accounts, groups, memberships, or financial records. Members are deactivated and their membership periods retained.
 - Next.js Server Actions provide request-origin protection; each action still authenticates the session and enforces its relevant owner/member authorization server-side.
 
-### Files created
+### Files moved
 
-- `prototype/src/app/actions/auth.ts`
-- `prototype/src/app/actions/expenses.ts`
-- `prototype/src/app/actions/groups.ts`
-- `prototype/src/app/dashboard.tsx`
-- `prototype/src/app/login/page.tsx`
-- `prototype/src/components/submit-button.tsx`
-- `prototype/src/lib/auth/accounts.ts`
-- `prototype/src/lib/auth/password.ts`
-- `prototype/src/lib/auth/password.test.ts`
-- `prototype/src/lib/auth/session.ts`
-- `prototype/src/lib/expenses/history.ts`
-- `prototype/src/lib/groups/service.ts`
-- `prototype/src/lib/groups/service.test.ts`
+- Phase 5A expense logic moved to `prototype/src/features/phase5a/expenses/`: `allocation.ts` and `create-expense.ts`.
+- Phase 5B source moved under `prototype/src/features/phase5b/`: auth (`accounts.ts`, `password.ts`, `session.ts`), actions (`auth.ts`, `groups.ts`, `expenses.ts`), groups (`service.ts`), expenses (`history.ts`), and UI (`dashboard.tsx`, `submit-button.tsx`).
+- All tests moved under the separate `prototype/tests/` tree: Phase 5A expense tests under `tests/phase5a/expenses/`; Phase 5B password and group service tests under `tests/phase5b/auth/` and `tests/phase5b/groups/`.
 
 ### Files modified
 
 - `prototype/PHASE5B_REVIEW.md` — approval, implementation summary, limitations, results, and demonstration instructions.
+- `prototype/PHASE5A_EXPENSE_IMPLEMENTATION_REPORT.md` — updated source and test paths.
 - `prototype/src/app/globals.css` — responsive SplitSmart styling.
 - `prototype/src/app/layout.tsx` — application metadata.
-- `prototype/src/app/page.tsx` — dashboard route entry.
+- `prototype/src/app/page.tsx` and `prototype/src/app/login/page.tsx` — route imports now reference the Phase 5B feature folder.
 - `prototype/tsconfig.json` — Next.js build-required JSX and development type includes added automatically during the successful production build.
 
-No dependency manifests or lockfiles changed. No unrelated Lab 6 or Lab 7 files changed. No files were staged, committed, or pushed.
+The existing `prototype/src/lib/prisma.ts` remains in the shared infrastructure folder. No dependency manifests, lockfiles, Prisma schema, migrations, or database files changed. No unrelated Lab 6 or Lab 7 files changed. No files were staged, committed, or pushed.
 
 ### Verification results
 

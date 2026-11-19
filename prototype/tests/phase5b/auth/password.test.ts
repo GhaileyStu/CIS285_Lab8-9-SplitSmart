@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashPassword, validateAccountInput, verifyPassword } from "./password";
+import { hashPassword, validateAccountInput, verifyPassword } from "../../../src/features/phase5b/auth/password";
 
 describe("prototype account credentials", () => {
   it("normalizes usernames and email addresses before storage", () => {

@@ -1,10 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth/session";
-import { createExpense } from "@/lib/expenses/create-expense";
-import { requireActiveGroupMember } from "@/lib/groups/service";
-import type { ExpenseSplitMethod } from "@/lib/expenses/allocation";
+import { requireUser } from "../auth/session";
+import { createExpense } from "../../phase5a/expenses/create-expense";
+import { requireActiveGroupMember } from "../groups/service";
+import type { ExpenseSplitMethod } from "../../phase5a/expenses/allocation";
 
 function text(formData: FormData, key: string) {
   const value = formData.get(key);

@@ -14,10 +14,10 @@ The approved design and source-aligned allocation policy remain authoritative. T
 
 | File | Purpose |
 | --- | --- |
-| `prototype/src/lib/expenses/allocation.ts` | Validates allocation inputs, calculates exact cent shares, applies the approved residual rule, and returns ordered allocations. |
-| `prototype/src/lib/expenses/allocation.test.ts` | Unit tests for equal and percentage allocation, rounding, remainder handling, validation, and reconciliation. |
-| `prototype/src/lib/expenses/create-expense.ts` | Validates and creates group or direct expenses inside a Prisma transaction. |
-| `prototype/src/lib/expenses/create-expense.test.ts` | Service tests using isolated disposable SQLite databases. |
+| `prototype/src/features/phase5a/expenses/allocation.ts` | Validates allocation inputs, calculates exact cent shares, applies the approved residual rule, and returns ordered allocations. |
+| `prototype/tests/phase5a/expenses/allocation.test.ts` | Unit tests for equal and percentage allocation, rounding, remainder handling, validation, and reconciliation. |
+| `prototype/src/features/phase5a/expenses/create-expense.ts` | Validates and creates group or direct expenses inside a Prisma transaction. |
+| `prototype/tests/phase5a/expenses/create-expense.test.ts` | Service tests using isolated disposable SQLite databases. |
 | `prototype/src/lib/prisma.ts` | Shared Prisma client singleton, with global caching outside production. |
 | `prototype/PHASE5A_EXPENSE_IMPLEMENTATION_REPORT.md` | This review report. |
 

@@ -4,7 +4,7 @@ import {
   MAX_SQLITE_INTEGER,
   type ExpenseSplitMethod,
 } from "./allocation";
-import { prisma } from "../prisma";
+import { prisma } from "../../../lib/prisma";
 
 const MIN_SQLITE_INTEGER = -BigInt("9223372036854775808");
 

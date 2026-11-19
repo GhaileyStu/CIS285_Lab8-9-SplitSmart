@@ -9,7 +9,7 @@ import {
   ExpenseCreationError,
   type CreateDirectExpenseInput,
   type CreateGroupExpenseInput,
-} from "./create-expense";
+} from "../../../src/features/phase5a/expenses/create-expense";
 
 let prisma: PrismaClient;
 let testDirectory: string;

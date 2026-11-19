@@ -1,8 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth/session";
-import { addGroupMember, createGroup, deactivateGroupMember, updateGroup } from "@/lib/groups/service";
+import { requireUser } from "../auth/session";
+import { addGroupMember, createGroup, deactivateGroupMember, updateGroup } from "../groups/service";
 
 function text(formData: FormData, key: string) {
   const value = formData.get(key);

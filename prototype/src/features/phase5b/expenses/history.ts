@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import { prisma } from "../prisma";
+import { prisma } from "../../../lib/prisma";
 import { requireActiveGroupMember } from "../groups/service";
 
 export async function listGroupExpenses(userId: string, groupId: string, client: PrismaClient = prisma) {

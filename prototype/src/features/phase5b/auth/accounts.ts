@@ -1,4 +1,4 @@
-import { prisma } from "../prisma";
+import { prisma } from "../../../lib/prisma";
 import type { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes } from "node:crypto";
 import { hashPassword, validateAccountInput, verifyPassword } from "./password";

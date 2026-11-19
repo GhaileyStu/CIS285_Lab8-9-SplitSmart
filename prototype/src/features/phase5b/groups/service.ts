@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { prisma } from "../prisma";
+import { prisma } from "../../../lib/prisma";
 
 function cleanText(value: string, field: string, maxLength: number) {
   const clean = value.trim();

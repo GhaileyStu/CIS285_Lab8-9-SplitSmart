@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { addMemberAction, createGroupAction, deactivateMemberAction, updateGroupAction } from "@/app/actions/groups";
-import { createGroupExpenseAction } from "@/app/actions/expenses";
-import { logoutAction } from "@/app/actions/auth";
-import { SubmitButton } from "@/components/submit-button";
-import { getCurrentUser } from "@/lib/auth/session";
-import { listGroupExpenses } from "@/lib/expenses/history";
-import { listGroupsForUser } from "@/lib/groups/service";
+import { addMemberAction, createGroupAction, deactivateMemberAction, updateGroupAction } from "../actions/groups";
+import { createGroupExpenseAction } from "../actions/expenses";
+import { logoutAction } from "../actions/auth";
+import { SubmitButton } from "./submit-button";
+import { getCurrentUser } from "../auth/session";
+import { listGroupExpenses } from "../expenses/history";
+import { listGroupsForUser } from "../groups/service";
 
 type GroupData = Awaited<ReturnType<typeof listGroupsForUser>>[number];
 type ExpenseData = Awaited<ReturnType<typeof listGroupExpenses>>["expenses"][number];

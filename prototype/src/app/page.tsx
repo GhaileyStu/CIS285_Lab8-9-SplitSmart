@@ -1,4 +1,4 @@
-import Dashboard from "./dashboard";
+import Dashboard from "../features/phase5b/ui/dashboard";
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ group?: string; error?: string; notice?: string }> }) {
   return <Dashboard searchParams={searchParams}/>;

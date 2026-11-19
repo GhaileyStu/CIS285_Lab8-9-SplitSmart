@@ -1,8 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { authenticateAccount, registerAccount } from "@/lib/auth/accounts";
-import { createSession, destroySession } from "@/lib/auth/session";
+import { authenticateAccount, registerAccount } from "../auth/accounts";
+import { createSession, destroySession } from "../auth/session";
 
 function value(formData: FormData, key: string) {
   const item = formData.get(key);
