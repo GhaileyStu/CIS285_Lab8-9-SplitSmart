@@ -1,54 +1,121 @@
-# SplitSmart Lab 9 — Phase 5A Expense Allocation and Creation Report
+# SplitSmart Lab 9 — Phase 5A Expense Allocation and Creation Review
 
 **Date:** 2026-11-19  
 **Branch:** `feature/splitsmart-prototype`  
-**Outcome:** Implementation stopped before edits because the approved allocation rule produces a negative share for valid input, and the task explicitly requires review rather than inventing a different policy.
+**Status:** Phase 5A allocation and expense creation are implemented. The recorded automated checks passed. This report is a guided review of the delivered scope and its boundaries.
 
-## Conflict requiring a product/design decision
+## 1. Phase goal and boundary
 
-The approved design requires each allocation to be rounded half-up to two decimal places, then assigns the full residual to the payer when the payer participates, otherwise to the first submitted participant. The design also allows zero-cent shares and requires persisted shares to be nonnegative.
+Phase 5A establishes reusable expense allocation and transactional expense creation on the existing Next.js, TypeScript, Prisma 6.19.3, and SQLite foundation. It does not implement the full product. In particular, this phase does not add the group approval workflow, payment settlement, reversals, authentication/session handling, notifications, reports, API routes, or user interface features.
 
-These rules conflict for valid inputs:
+The approved design and source-aligned allocation policy remain authoritative. The allocation rule is independent per-share `ROUND_HALF_UP`, followed by assigning the complete residual to the payer when they are a participant, otherwise to the first submitted participant. The residual recipient does not get priority during the initial rounding step.
 
-- Expense total: **$0.03**.
-- Participants in submitted order: payer at **0 basis points**, then participants at **5,000 basis points** each.
-- Percentages total exactly **10,000 basis points**.
-- Half-up rounded shares: **$0.00, $0.02, $0.02**. These sum to $0.04.
-- Residual: **−$0.01**. The specified recipient is the payer, so the final shares would be **−$0.01, $0.02, $0.02**.
+## 2. Files delivered
 
-The negative payer share violates the approved `ExpenseShare.shareCents >= 0` constraint. The inputs satisfy the stated amount, participant, percentage, and payer rules. An equal-split example also exhibits the problem: splitting $0.02 among four participants rounds each share to $0.01; the −$0.02 residual assigned to the payer/first participant would make that share −$0.01.
+| File | Purpose |
+| --- | --- |
+| `prototype/src/lib/expenses/allocation.ts` | Validates allocation inputs, calculates exact cent shares, applies the approved residual rule, and returns ordered allocations. |
+| `prototype/src/lib/expenses/allocation.test.ts` | Unit tests for equal and percentage allocation, rounding, remainder handling, validation, and reconciliation. |
+| `prototype/src/lib/expenses/create-expense.ts` | Validates and creates group or direct expenses inside a Prisma transaction. |
+| `prototype/src/lib/expenses/create-expense.test.ts` | Service tests using isolated disposable SQLite databases. |
+| `prototype/src/lib/prisma.ts` | Shared Prisma client singleton, with global caching outside production. |
+| `prototype/PHASE5A_EXPENSE_IMPLEMENTATION_REPORT.md` | This review report. |
 
-An integer-only diagnostic calculation reproduced the percentage case. No allocation implementation was added because doing so would require choosing a different residual policy or rejecting otherwise valid inputs, both of which would change approved behavior.
+The approved database design document was also updated to restore the source-aligned allocation policy and record the nonnegative-share limitation. The Prisma schema and migrations were not changed. `npx prisma generate` generated the local Prisma client; it did not change dependencies or the schema.
 
-## Work and checks completed before stopping
+## 3. Allocation behavior
 
-- Read the requested source specification, `UserRequirement.md`, approved database design, Prisma schema, Phase 3B audit, and Phase 4 migration report.
-- Inspected the application structure. It is a minimal Next.js scaffold with `src/app/page.tsx`, `layout.tsx`, and `globals.css`; no existing expense services or Prisma client setup were found.
-- Inspected `prototype/package.json` and `prototype/tsconfig.json`. Vitest is already present as a development dependency (`^5.1.0`), though no test script is configured. No new dependency is needed for testing.
-- Confirmed the approved Prisma schema and database migration contain `ExpenseShare.shareCents >= 0`, permit zero-cent shares, and use basis points from 0 through 10,000.
-- Ran the integer-only diagnostic example described above.
-- Ran `git diff --check`; it passed.
+### Inputs and exact arithmetic
 
-No application implementation, automated tests, TypeScript check, lint command, Prisma validation, or database operation was run for Phase 5A. The pre-existing development database was not inspected or modified in this task.
+The API accepts a decimal amount string, a split type (`EQUAL` or `PERCENTAGE`), payer ID, and the submitted participant list. Percentage splits additionally include each participant's integer basis points. Amount strings are parsed into `BigInt` cents. Ratio calculations use integer numerator/denominator arithmetic; no JavaScript floating-point arithmetic is used.
 
-## Files changed
+For equal splits, each participant's exact fraction of the total is rounded independently to cents using `ROUND_HALF_UP`. For percentage splits, the exact share is `amountCents × basisPoints / 10,000`, also rounded independently with `ROUND_HALF_UP`. The service then computes the residual between the expense total and the rounded shares and assigns the entire residual according to the payer/first-submitted-participant rule. This is the approved source policy, even when a different distribution might produce nonnegative shares.
 
-Only this requested report was created:
+### Validation
 
-- `prototype/PHASE5A_EXPENSE_IMPLEMENTATION_REPORT.md`
+The allocator rejects empty or duplicate participant lists, missing payer IDs, malformed or non-positive amount strings, amounts above the SQLite signed 64-bit maximum, unsupported split types, negative/non-integer/out-of-range basis points, and percentage totals other than 10,000. It also verifies that the final shares are nonnegative, within supported integer bounds, and sum exactly to the source amount. Zero-cent shares are valid.
 
-No allocation or expense creation code was changed. No schema, migration, dependency, or application files were changed. Nothing was staged, committed, or pushed.
+### Worked examples
 
-## Decision needed to resume
+All values below follow independent `ROUND_HALF_UP` first and then apply the full residual to the designated recipient.
 
-Clarify how valid allocations should reconcile when half-up rounding creates a negative residual larger than the payer/first participant's rounded share, while preserving nonnegative participant shares. Until the approved allocation policy resolves this case, Phase 5A implementation cannot safely proceed.
+| Input | Independent rounded shares | Residual recipient | Final result |
+| --- | --- | --- | --- |
+| $60.00 equal among 3 | $20.00, $20.00, $20.00 | None; residual $0.00 | $20.00, $20.00, $20.00 |
+| $10.00 equal among 3; payer is participant 1 | $3.33, $3.33, $3.33 | Payer receives +$0.01 | $3.34, $3.33, $3.33 |
+| $10.00 equal among 3; payer is participant 3 | $3.33, $3.33, $3.33 | Payer receives +$0.01 | $3.33, $3.33, $3.34 |
+| $0.01 split 50%/50%; payer is participant 2 | $0.01, $0.01 | Payer receives −$0.01 | $0.01, $0.00 |
+| $0.03 split 0%/50%/50%; payer has 0% | $0.00, $0.02, $0.02 | Payer would receive −$0.01 | Rejected: negative final share |
+| $0.02 equal among 4; payer is participant 1 | $0.01, $0.01, $0.01, $0.01 | Payer would receive −$0.02 | Rejected: negative final share |
 
-Final `git status --short --branch` at report creation:
+The last two rows expose an inherent limitation of the approved policy: independently rounded shares can exceed the total, leaving a negative residual. If that residual is assigned to a participant with too small a rounded share, a nonnegative share cannot be preserved. The allocator rejects such an input with a domain error (`UNALLOCATABLE_RESIDUAL`); it does not silently change the rule, allow a negative share, or persist an unreconciled expense. The approved design document records this limitation. Product/design review is needed if those valid-looking inputs must be accepted under a different policy.
+
+## 4. Expense creation flow
+
+`createExpense` accepts an explicit authenticated actor/user ID and a discriminated group/direct expense input. The service follows this sequence:
+
+1. Validate required identifiers, description, expense date, currency format where applicable, amount, split definition, payer, and participants.
+2. Confirm the actor, payer, and participants exist.
+3. Resolve authorization and accounting scope. Group expenses use the group's configured currency and a group `BalanceScope`. Direct expenses require exactly two people across payer and participants, require the actor to be one of those people, and use/create the currency-specific direct scope for that unordered pair.
+4. Calculate and validate the ordered shares.
+5. Within one Prisma transaction, create the expense, its initial revision, and its ordered expense-share records. A failure rolls back all writes.
+6. For direct expenses only, mark the expense approved and update the corresponding `PairwiseObligation` in that same transaction. Group expenses remain pending and do not affect pairwise balances in this phase.
+
+Group expense creation requires the group to exist and the creator, payer, and every submitted participant to have active membership. Direct creator validation requires the actor to be the payer or one of the participants; the direct transaction is limited to the relevant two-user pair. Group currency comes from the group configuration. Direct balance scopes include both canonical user IDs and currency, so USD and CAD obligations remain separate.
+
+The pairwise sign convention is maintained: a positive amount means the canonical low user owes the high user; a negative amount means the high user owes the low user. A participant's share creates an obligation to the payer; the payer's own share creates no self-obligation. Projection updates use checked integer arithmetic and reject signed 64-bit overflow.
+
+The typed result contains identifiers, status, currency, integer-cent strings, participant IDs, basis points, and submitted order metadata. It does not return receipt contents or account data.
+
+## 5. Initial statuses and projection effects
+
+| Expense kind | Initial state | Approval rows | Pairwise projection |
+| --- | --- | --- | --- |
+| Group | `PENDING` | None created by this phase | No update while pending |
+| Direct | `APPROVED` under the approved prototype default | None | Updated transactionally with expense creation |
+
+Approval/rejection behavior for group expenses remains outside Phase 5A. No pending group expense is included in balances. Rebuilding projections, payments, and reversal handling also remain outside this phase.
+
+## 6. Automated test coverage
+
+`npx vitest run` passed **2 test files and 23 tests**.
+
+**Allocation tests (13):** evenly divisible equal split; equal split remainder; payer at first or later submitted position; payer excluded and residual assigned to first participant; percentage `ROUND_HALF_UP`; tied rounded percentages; zero-cent shares; tiny amounts; invalid percentage total/values; duplicate or missing participants; missing payer; malformed, non-positive, or overflowing amounts; unsupported split type; negative residual rejection; exact reconciliation and nonnegative assertions for accepted allocations.
+
+**Expense creation tests (10):** valid pending group expense with revision and ordered shares; invalid/inactive group membership; invalid payer/participant records; direct expense approval and no approval rows; separate USD/CAD scopes; actor neither payer nor participant; direct pair limitation; correct pairwise sign and no self-obligation; pending group has no projection effect; transaction rollback on projection overflow; invalid date, description, and currency.
+
+Service tests build an isolated temporary SQLite database by running the existing migration SQL against that disposable file and point Prisma at it. The tests do not connect to the Phase 4 development database, and their temporary directory is removed afterward.
+
+## 7. Verification results
+
+| Check | Result |
+| --- | --- |
+| `npx vitest run` | Passed: 2 files, 23 tests |
+| `npx tsc --noEmit` | Passed; existing TypeScript target unchanged |
+| `npm run lint` | Passed |
+| `npx prisma validate` | Passed |
+| Prisma CLI / `@prisma/client` versions | Both 6.19.3 |
+| `git diff --check` | Passed |
+
+The Phase 4 database at `prototype/prisma/dev.db` was not used by the tests, reset, or replaced. Its recorded before/after SHA-256 remained `107b9b2fb10f65795c18292594e2f1d1826a407581edb93294d7abbab665cd5c` (405,504 bytes).
+
+## 8. Scope and remaining limitations
+
+- Prisma schema, migrations, package manifest, and lockfile were not modified; Prisma was not upgraded.
+- The development database was not modified. Tests used only a disposable temporary database.
+- The nonnegative-share guard means some inputs that pass the basic amount and percentage checks are rejected when the specified residual would make one share negative.
+- Group approval/rejection, payment services, reversals, account/session authentication, notifications, reports, API endpoints, and UI work remain unimplemented by design in this phase.
+- No changes were staged, committed, or pushed.
+
+## 9. Final working-tree status
+
+The `git status --short --branch` check after this report expansion was:
 
 ```text
 ## feature/splitsmart-prototype...origin/feature/splitsmart-prototype
-?? prototype/DATABASE_MIGRATION_PHASE4_REPORT.md
-?? prototype/DATABASE_MIGRATION_PREFLIGHT_PHASE4.md
-?? prototype/PHASE5A_EXPENSE_IMPLEMENTATION_REPORT.md
+ M prototype/PHASE5A_EXPENSE_IMPLEMENTATION_REPORT.md
+?? prototype/src/lib/
 ```
+
+`git diff --check` passed after the report update. This turn changed only this report; the untracked `prototype/src/lib/` tree contains the Phase 5A implementation and tests listed above. Nothing was staged, committed, or pushed.
 
