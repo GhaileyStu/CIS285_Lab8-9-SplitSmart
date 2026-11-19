@@ -132,7 +132,7 @@ All string IDs use `String @id @default(cuid())` unless stated otherwise. `DateT
 - `participantUserId String` — required FK to User.
 - `shareCents BigInt` — required and >= 0; zero-cent shares are valid.
 - `percentageBasisPoints Int?` — null for equal split; 0–10,000 for percentage split.
-- `allocationOrder Int` — required, immutable participant order from the submitted revision, used to determine the specification's “first participant” for deterministic rounding adjustment.
+- `allocationOrder Int` — required, immutable participant order from the submitted revision, used to break equal fractional-remainder ties deterministically.
 - Relations: revision, participant.
 - Unique `(revisionId, participantUserId)` and `(revisionId, allocationOrder)`; index `(participantUserId, revisionId)`.
 - `onDelete`: `Restrict` from revision and participant. Shares are immutable.
@@ -265,6 +265,36 @@ Cross-row percentage totals and share sum are verified in the server transaction
 - **Financial immutability:** reject UPDATE and DELETE on ExpenseRevision, ExpenseShare, Approval, Reversal, ReversalEntry, Payment, and Receipt. Corrections are represented by new reversal/replacement records. Expense’s status/current revision/current scope fields are projections and may be updated through guarded transactions.
 - **Ledger event idempotence:** the conditional Expense status transition and unique Reversal/Payment keys prevent duplicate projection changes; the transaction applies each source event once.
 
+### Approved expense allocation policy: largest remainder
+
+This policy replaces independent per-participant `ROUND_HALF_UP` rounding followed by assigning the full residual to the payer or first participant. It applies to both equal and percentage splits.
+
+1. Parse the positive expense amount into integer cents. Perform allocation using integer arithmetic or exact rational arithmetic only; never use JavaScript floating-point arithmetic.
+2. Calculate each participant's exact proportional share in cents. For an equal split, it is `totalCents / participantCount`. For a percentage split, it is `totalCents * percentageBasisPoints / 10,000`.
+3. Initially assign each participant the whole-cent floor of their exact share.
+4. Compute remaining cents as the original total minus the sum of those floor amounts.
+5. Distribute remaining cents one at a time to participants with the largest fractional remainders. Each participant can receive at most one of these remaining cents for a single allocation.
+6. Break equal fractional-remainder ties by submitted participant order (`allocationOrder`). The payer receives no automatic priority; the payer only receives a remainder cent if the payer ranks highest or wins a tie by submission order.
+7. For percentage splits, require integer basis-point allocations to be nonnegative, within the supported range, and total exactly 10,000. Invalid totals are rejected.
+8. Preserve zero-cent shares. Every final share must be nonnegative, and the sum of final shares must equal the original amount exactly. Reject an allocation if those invariants cannot be satisfied; never create or discard money.
+9. Preserve the payer and participant validation rules elsewhere in this design. The payer may be included or excluded from the participant set as permitted for the expense kind. Preserve submitted participant order in `ExpenseShare.allocationOrder`.
+
+Documented allocation examples and required automated assertions:
+
+| Case | Result in submitted participant order |
+|---|---|
+| $60.00 equally among 3 | $20.00, $20.00, $20.00 |
+| $10.00 equally among 3 | $3.34, $3.33, $3.33 |
+| $0.03 at 0%, 50%, 50% | $0.00, $0.02, $0.01; the tied 50% remainders are decided by submitted order |
+| $0.02 equally among 4 | $0.01, $0.01, $0.00, $0.00 |
+| $10.00 equally among 3, with payer submitted third | $3.34, $3.33, $3.33; the first participant wins the equal-remainder tie, not the payer |
+
+Tests must also cover percentage ties, a payer who is not first, zero-cent shares, invalid percentage totals, exact reconciliation, and nonnegative final shares. For every accepted case, assert `sum(shareCents) === amountCents` and `shareCents >= 0` for every participant.
+
+### Source-specification discrepancy
+
+The source specification remains unchanged. Its NFR-002, AC-006, SC-002, and assumption text explicitly require BigDecimal `ROUND_HALF_UP` rounding of each participant allocation and assignment of any discrepancy to the payer if included, otherwise to the first participant. That source rule conflicts with the newly approved largest-remainder allocation policy above, which uses integer/exact-rational floors and fractional-remainder ordering and gives the payer no automatic priority. The approved design policy intentionally supersedes the source rule for expense allocation only; source text for the conflict is documented here, not edited. This discrepancy must remain visible in implementation and verification records.
+
 ### Prisma-enforceable vs server-side transactional validation
 
 Prisma schema can express scalar types, required/optional fields, FKs, relations, ordinary unique constraints, and indexes. SQL migration additions are required for CHECK constraints, partial unique indexes, and triggers.
@@ -273,7 +303,7 @@ The server must transactionally validate:
 
 - Authenticated actor and active group membership of group-expense creator, payer, and participants at submission/revision creation, following the confirmed stricter design decision in Section 11. The source itself explicitly requires the creator to be a group member and participants to be active; payer membership is a stricter prior design rule.
 - Direct expense's two-user set and creator membership in that set.
-- Use `BigDecimal` with `ROUND_HALF_UP` to two decimal places for all application-layer monetary calculations, including allocations, balance/payment validation, and report totals, as required by NFR-002. Equal and percentage allocations are calculated in base-10 decimal arithmetic; percentages are represented as basis points and must total exactly 10,000. Round each participant allocation to two decimal places, then apply the full residual needed to make shares equal the expense total to the payer if the payer is a participant, otherwise to the first participant in the submitted participant order. Persist only validated two-decimal results as integer cents. Preserve submitted participant order in immutable share rows so “first participant” is reproducible. Use no binary floating point. Convert checked BigDecimal results to integer cents at persistence boundaries; SQL and stored integer-cent ledger deltas enforce exactness and signed 64-bit bounds without introducing monetary rounding.
+- **Expense allocation uses the approved largest-remainder policy in Section 4**, implemented with integer arithmetic or exact rational arithmetic. Do not use binary floating point or independently round each participant's amount with `ROUND_HALF_UP`. Percentage allocations use basis points and must total exactly 10,000. Persist final shares as integer cents and preserve participant submission order in immutable share rows. For monetary calculations outside allocation, the source NFR-002 specifies BigDecimal and `ROUND_HALF_UP` to two decimal places; validate checked results and signed 64-bit bounds before persistence.
 - Currency consistency across scope, group, revision, reversal entry, payment, and source events. A direct expense reuses or transactionally creates the scope for the unordered pair plus currency. Never add or report totals across currencies without an explicit conversion rule; payments settle only within the same currency scope.
 - Enforce the configured supported-currency allowlist and two-decimal precision policy. Under the proposed owner-only prototype permission default, only the group owner can invite users or change membership/settings; all authorization is checked server-side. Validate report start/end ordering and use the approved timezone policy when product confirms it.
 - Checked arbitrary-precision intermediate arithmetic and signed 64-bit bounds before every persisted sum, delta, and projection update.
@@ -368,6 +398,7 @@ Proposed sequence, only after approval:
 
 ### Confirmed design decisions
 
+- **Expense allocation:** use exact integer or rational largest-remainder allocation for equal and percentage splits. Floor exact shares to cents, distribute remaining cents by descending fractional remainder, and break ties by submitted participant order. The payer gets no automatic priority. Preserve zero-cent, nonnegative shares and reconcile exactly to the expense total.
 - **Direct-pair currency:** separate direct balances per unordered user pair and currency. Scope identity is `(directLowUserId, directHighUserId, currencyCode)`. Expenses and payments use the matching currency-specific scope; balances are never combined across currencies. Group expenses continue to use the group's configured currency.
 - **Financial correction:** approved expense revisions cannot be edited. Correct them through reversal and replacement.
 - **Reversal completeness:** finalization requires exactly one reversal entry for every non-payer source share with nonzero cents; missing, duplicate, and extra entries are rejected.
@@ -379,7 +410,7 @@ Proposed sequence, only after approval:
 - **Money limits:** cap each nonnegative monetary amount at SQLite's signed 64-bit maximum (`9,223,372,036,854,775,807` cents), with signed projection range checks and checked arbitrary-precision intermediate arithmetic. Confirm this product-level maximum and whether lower per-currency limits are needed.
 - **Direct-expense approval:** source documents leave participant review open. Proposed prototype default: direct expenses are immediately approved on creation. If review is selected, direct expenses remain pending, produce no balance effect until every participant approves, and rejected/pending revisions are excluded from reversals and projection rebuilds; only an approved direct expense may be reversed.
 - **Group currency changes:** proposed default is to make a group currency immutable after the first financial revision. For a different currency, create a new group or require an explicit migration that preserves the original scope and currency for every historical revision; do not retarget existing revisions.
-- **Supported currency catalog:** proposed scope is currencies compatible with two-decimal amounts because the source mandates two-decimal rounding and this design persists integer cents; confirm the catalog.
+- **Supported currency catalog:** proposed scope is currencies compatible with two-decimal amounts because the source mandates two-decimal monetary precision and this design persists integer cents; confirm the catalog.
 - **Account/group deletion:** proposed default is soft deactivation and no hard deletion while financial/history references exist. Retention duration and erasure policy remain open.
 - **Receipt handling:** proposed maximum is 5 MB; formats, retention, and SQLite versus private external storage remain open.
 - **Account recovery and detailed group permissions:** proposed prototype default is owner-only group settings/membership administration. Recovery workflow and delegated roles are not specified by the source.
@@ -405,7 +436,7 @@ Compared this proposal with `UserRequirement.md` and `specs/001-expense-sharing/
 
 1. FR-003 requires the group expense creator to be a group member; FR-004 requires each group participant to be an active member. Neither says that an excluded payer must be a member. The prior stricter rule that creator, payer, and participants must all be active group members is retained as a confirmed design decision, clearly distinguished from source text. Recommended rule: retain it because it was previously established, it provides consistent group-scoped authorization for all expense actors, and it does not conflict with the source, while recognizing that the payer condition is stricter than the stated minimum.
 2. FR-005 explicitly requires participant approval for group expenses. AC-005 says direct expenses are recorded without group approval, but Open Question 2 explicitly asks whether direct expenses also need participant review. Direct-expense approval therefore remains a genuine product decision; the immediate-approval rule is only the proposed prototype default and its alternative effects are specified consistently in Sections 5–7.
-3. NFR-002 and AC-006 require BigDecimal, ROUND_HALF_UP to two decimals, and exact allocation reconciliation to the payer or first participant. The design uses that application calculation rule while persisting integer cents and enforcing checked 64-bit bounds.
+3. NFR-002, AC-006, SC-002, and the source assumptions require BigDecimal `ROUND_HALF_UP` for each share and assign the allocation discrepancy to the payer or first participant. The newly approved design policy intentionally differs for expense allocation: it uses exact integer/rational largest-remainder allocation with submitted-order tie breaking and no payer priority, while retaining exact reconciliation and nonnegative shares. This is a documented source-specification conflict; the source documents are not modified. Persist results as integer cents and enforce checked 64-bit bounds.
 4. The source specifies group-configured currency and selected currency for a direct expense, but does not enumerate supported currencies or decide group currency changes. The separate direct pair/currency scope is a confirmed design decision; no cross-currency aggregation or implicit conversion is permitted.
 5. The source requires debtor-only payment and rejects overpayment; zero/negative payments remain open. It requires date-range reporting, but leaves extra filters/timezone unresolved. It also leaves receipt formats/size/retention, account recovery, detailed group roles, and notification delivery failures/future channels open.
 
