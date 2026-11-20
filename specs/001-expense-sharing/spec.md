@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: Authoritative customer requirements in `UserRequirement.md`; user request
+**Input**: Authoritative [customer requirements](Architecture/UserRequirement.md) and user request
 to produce a testable feature specification and separately identify a Java Swing
 MVP subset.
 
@@ -44,7 +44,7 @@ listed under Open Questions.
 
 ## Customer Requirement Inventory
 
-This inventory preserves the feature areas stated in `UserRequirement.md`.
+This inventory preserves the feature areas stated in the [customer requirements](Architecture/UserRequirement.md).
 Requirement IDs are used throughout this specification and MUST remain traceable
 to the customer source, design, and verification.
 

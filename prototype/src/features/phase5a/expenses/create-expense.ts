@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import {
   allocateExpense,
   type ExpenseSplitMethod,
@@ -52,7 +52,9 @@ export interface CreateDirectExpenseInput extends CommonExpenseInput {
 }
 
 export type CreateExpenseInput = CreateGroupExpenseInput | CreateDirectExpenseInput;
-export type ExpenseTransactionClient = Pick<PrismaClient, "$transaction">;
+export interface ExpenseTransactionClient {
+  $transaction<T>(operation: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T>;
+}
 
 export interface ExpenseCreationResult {
   expenseId: string;

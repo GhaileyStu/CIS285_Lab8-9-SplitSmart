@@ -53,7 +53,7 @@ as evidence that a requirement is satisfied.
 
 ## Implementation Decisions and Customer Requirements
 
-The customer request is recorded in [UserRequirement.md](../../UserRequirement.md).
+The customer request is recorded in [UserRequirement.md](../../specs/001-expense-sharing/Architecture/UserRequirement.md).
 It asks for user accounts; group management; expense creation with equal or
 percentage splits and optional receipts; notifications; expense approval;
 balance and payment tracking; reporting; and a primarily web-based product with
